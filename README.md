@@ -1,2 +1,2 @@
-# pcff
-Parametric convex function fitting
+# lpcf
+Learning parametric convex functions
