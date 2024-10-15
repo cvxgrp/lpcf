@@ -49,6 +49,7 @@ if example == '2d':
     U = np.vstack((U1,U2)).T
 
     n1,n2 = 10,10  # number of neurons in convex function
+    n1w, n2w = 0, 0 # number of neurons in convex function not dependent of optimization variables
 
 else:
     # nonlinear model predictive control example
@@ -84,10 +85,11 @@ else:
     X = np.hstack((U,P))
     
     n1,n2 = 10,10  # number of neurons in convex function
+    n1w, n2w = 0, 0 # number of neurons in convex function not dependent of optimization variables
     
 nx = nu+npar  # number of inputs
 
-n_convex = 11 # number of weights in convex fcn
+n_convex = 18 # number of weights in convex fcn
 
 parallel_training = parallels_seeds > 1
 
@@ -102,12 +104,14 @@ def act(x):
 
 @jax.jit
 def convex_fcn(x,params):
-    W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3 = params
+    W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3, W1wp, b1w, W2w, W2zw, W2pw, b2w, W3w = params
     v=x[:,:nu]
     p=x[:,nu:]
     z1 = act(W1v @ v.T + W1p @ p.T + b1)
-    z2 = act(W2z @ z1 + W2v @ v.T + W2p @ p.T + b2)
-    y = W3z @ z2 + W3v @ v.T + W3p @ p.T + b3
+    w1 = act(W1wp @ p.T + b1w)
+    z2 = act(W2z @ z1 + W2v @ v.T + W2p @ p.T + b2 + W2w @ w1)
+    w2 = act(W2zw @ w1 + W2pw @ p.T + b2w)
+    y = W3z @ z2 + W3v @ v.T + W3p @ p.T + b3 + W3w @ w2
     return y.T
 
 model = StaticModel(ny, nx, convex_fcn) 
@@ -125,7 +129,15 @@ def init_fcn(seed):
         np.random.rand(ny, n2),  # W3z (constrained >= 0)
         np.random.randn(ny, nu),  # W3v (this is unconstrained, as the last layer is linear)
         np.random.randn(ny, npar),  # W3p
-        np.random.randn(ny, 1)  # b3
+        np.random.randn(ny, 1),  # b3
+
+        np.random.randn(n1w, npar),  # W1wp 
+        np.random.randn(n1w, 1),  # b1w
+        np.random.randn(n2, n1w),  # W2w 
+        np.random.randn(n2w, n1w),  # W2zw 
+        np.random.randn(n2w, npar),  # W2pw 
+        np.random.randn(n2w, 1),  # b2w 
+        np.random.randn(ny, n2w),  # W3w 
     ]
     
     return params
@@ -134,11 +146,14 @@ model.init(params=init_fcn(4))
 
 # ##############
 # define lower bounds for parameters
-#
-# params = W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3 
 params_min = [-np.inf*np.ones((n1,nu)), -np.inf*np.ones((n1,npar)), -np.inf*np.ones((n1,1)),
               np.zeros((n2,n1)), -np.inf*np.ones((n2,nu)), -np.inf*np.ones((n2,npar)), -np.inf*np.ones((n2,1)),
-              np.zeros((ny,n2)), -np.inf*np.ones((ny,nu)), -np.inf*np.ones((ny,npar)), -np.inf*np.ones((ny,1))]
+              np.zeros((ny,n2)), -np.inf*np.ones((ny,nu)), -np.inf*np.ones((ny,npar)), -np.inf*np.ones((ny,1)),
+              
+              -np.inf*np.ones((n1w, npar)), -np.inf*np.ones((n1w, 1)), -np.inf*np.ones((n2, n1w)), 
+              -np.inf*np.ones((n2w, n1w)), -np.inf*np.ones((n2w, npar)), -np.inf*np.ones((n2w, 1)), 
+              -np.inf*np.ones((ny, n2w))  
+]
 #params_min = None
 params_max = None # no upper bounds
 
@@ -171,10 +186,18 @@ print(f"R2 score on (u,p) -> y mapping:         {R2}")
 v_cvx = cp.Variable((nu, 1))
 p_cvx = cp.Parameter((npar, 1))
 def create_convex_fcn(params):
-    W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3 = params
+    W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3, W1wp, b1w, W2w, W2zw, W2pw, b2w, W3w = params
     z1 = cp.logistic(W1v @ v_cvx + W1p @ p_cvx + b1)
-    z2 = cp.logistic(W2z @ z1 + W2v @ v_cvx + W2p @ p_cvx + b2)
-    y = W3z @ z2 + W3v @ v_cvx + W3p @ p_cvx + b3
+    if  n1w>0:
+        w1 = cp.logistic(W1wp @ p_cvx + b1w)
+    else:
+        w1 = np.zeros((0,1))
+    z2 = cp.logistic(W2z @ z1 + W2v @ v_cvx + W2p @ p_cvx + b2 + W2w @ w1)
+    if n2w>0:
+        w2 = cp.logistic(W2zw @ w1 + W2pw @ p_cvx + b2w)
+    else:
+        w2 = np.zeros((0,1))
+    y = W3z @ z2 + W3v @ v_cvx + W3p @ p_cvx + b3 + W3w @ w2
     return y
 cvx_fun = create_convex_fcn(model.params)
 print(f'cvxpy expressions is {"DCP" if cvx_fun.is_dcp() else "non-DCP"}')
@@ -184,7 +207,7 @@ print(f'cvxpy expressions is {"DPP" if cvx_fun.is_dpp() else "non-DPP"}')
 if tau_th > 0:
     print(model.sparsity_analysis())
 
-W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3 = model.params
+W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3, W1wp, b1w, W2w, W2zw, W2pw, b2w, W3w = model.params
 
 if example=='2d':
     P=[-.8, 0., .3, .8]
