@@ -21,6 +21,9 @@ parallels_seeds = 10 # number of parallel training sessions (parallel_seeds = 1 
 N = 5000 # number of training data points
 wy=1. # weight on fitting y (output function)
 wu=0.1 # weight on fitting u (autoencoder) during training of the entire output + autoencoder functions
+# M=1000 # additional active learning samples (0=no active learning)
+M=0 # no active learning
+weight_a = 10. # weight on new active samples (only used if M>0)
 
 seed = 4 # for reproducibility of results
 np.random.seed(seed)
@@ -50,6 +53,9 @@ if example == '2d':
 
     n1,n2 = 10,10  # number of neurons in convex function
     n1w, n2w = 0, 0 # number of neurons in convex function not dependent of optimization variables
+    
+    def oracle(U,P):
+        return f(U[:,0],U[:,1],P)
 
 else:
     # nonlinear model predictive control example
@@ -204,26 +210,48 @@ print(f'cvxpy expressions is {"DCP" if cvx_fun.is_dcp() else "non-DCP"}')
 print(f'cvxpy expressions is {"DPP" if cvx_fun.is_dpp() else "non-DPP"}')
 # #########################
 
-if tau_th > 0:
-    print(model.sparsity_analysis())
+if example=='2d':
+    constr = [v_cvx<=2.*np.ones((nu,1)), 
+                v_cvx>=-2.*np.ones((nu,1))]
+else:
+    pass #! TODO
+cvx_prob = cp.Problem(cp.Minimize(cvx_fun), constr)
+def solve_cvx_problem(cvx_prob,p):
+    p_cvx.value = np.array(p).reshape(npar,1)
+    cvx_prob.solve()
+    return v_cvx.value
+
+useActiveSampling = M>0
+
+if useActiveSampling:
+    # Refine function by actively sampling at surrogate minimizers
+    def active_sampling(P, oracle):
+        U = np.block([solve_cvx_problem(cvx_prob,p) for p in P]).T
+        Y = oracle(U,P)
+        return U, Y
+
+    Ua,Ya = active_sampling(P[0:M], oracle)
+    model.optimization(adam_epochs=0, lbfgs_epochs=2000, params_min=params_min, params_max=params_max)
+    @jax.jit
+    def output_loss(Yhat,Y): 
+        return jnp.sum((Yhat[:-M,:ny]-Y[:-M,:ny])**2)/(Y.shape[0]-M)+weight_a*jnp.sum((Yhat[-M:,:ny]-Y[-M:,:ny])**2)/M
+    model.loss(rho_th=1.e-8, tau_th=tau_th, output_loss=output_loss, zero_coeff=zero_coeff)
+    model.fit(np.vstack((Y.reshape(-1,ny),Ya.reshape(-1,ny))), np.vstack((X,np.hstack((Ua,P[0:M].reshape(-1,npar))))))
+    cvx_fun = create_convex_fcn(model.params)
+    cvx_prob = cp.Problem(cp.Minimize(cvx_fun), constr)
 
 W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3, W1wp, b1w, W2w, W2zw, W2pw, b2w, W3w = model.params
+if tau_th > 0:
+    print(model.sparsity_analysis())
 
 if example=='2d':
     P=[-.8, 0., .3, .8]
 
     # Solve random problems    
-    N_test=10
+    N_test=100
     P_test = np.concatenate((np.array(P).reshape(len(P),npar),np.random.rand(N_test,npar)*2.-1.))
-    constr = [v_cvx<=2.*np.ones((nu,1)), 
-                v_cvx>=-2.*np.ones((nu,1))]
-    cvx_prob = cp.Problem(cp.Minimize(cvx_fun), constr)
 
-    def solve_cvx_problem(p):
-        p_cvx.value = np.array(p).reshape(npar,1)
-        cvx_prob.solve()
-        return v_cvx.value
-    Uhat_test = np.block([solve_cvx_problem(p) for p in P_test]).T
+    Uhat_test = np.block([solve_cvx_problem(cvx_prob,p) for p in P_test]).T
     
     @jax.jit
     def jaxopt_fun(u,p):
@@ -262,13 +290,12 @@ if example=='2d':
             print(f"p = {p}: {msg}")
 
             ax[0,i].contour(U1,U2,Ytrue.reshape(U1.shape))
-            ax[0,i].plot(U_test[i][0],U_test[i][1],'*')
-            ax[0,i].plot(Uhat_test[i][0],Uhat_test[i][1],'d')
+            ax[0,i].plot(U_test[i][0],U_test[i][1],'*', color='blue')
+            ax[0,i].plot(Uhat_test[i][0],Uhat_test[i][1],'d', color='orange')
             ax[0,i].grid()
             ax[0,i].set_title(f'True function (p={p})')
             ax[1,i].contour(U1,U2,Yhat.reshape(U1.shape))
-            ax[1,i].plot(U_test[i][0],U_test[i][1],'*')
-            ax[1,i].plot(Uhat_test[i][0],Uhat_test[i][1],'d')
+            ax[1,i].plot(Uhat_test[i][0],Uhat_test[i][1],'d', color='orange')
             ax[1,i].grid()
             ax[1,i].set_title(f'Convex approximation (p={p})')
             
