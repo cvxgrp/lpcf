@@ -16,6 +16,7 @@ import flax.linen as nn
 import jaxopt
 from functools import partial
 
+# ################################
 plotfigs = True # set to True to plot figures
 parallels_seeds = 10 # number of parallel training sessions (parallel_seeds = 1 means no parallel training)
 N = 5000 # number of training data points
@@ -24,8 +25,15 @@ wu=0.1 # weight on fitting u (autoencoder) during training of the entire output 
 # M=1000 # additional active learning samples (0=no active learning)
 M=0 # no active learning
 weight_a = 10. # weight on new active samples (only used if M>0)
-
+tau_th = 0.*0.001 # L1-regularization term
+zero_coeff = 1.e-4 # small coefficients are set to zero when L1-regularization is used
+# input convex function model [Amos, Xu, Kolter, 2017]
+def act(x):    
+    return jnp.logaddexp(0.,x) # = log(1+exp(x)): activation function, must be convex and non decreasing on the domain of interest
+ny = 1 # number of outputs
 seed = 4 # for reproducibility of results
+# ################################
+
 np.random.seed(seed)
 
 jax.config.update('jax_platform_name', 'cpu')
@@ -52,7 +60,7 @@ if example == '2d':
     U = np.vstack((U1,U2)).T
 
     n1,n2 = 10,10  # number of neurons in convex function
-    n1w, n2w = 0, 0 # number of neurons in convex function not dependent of optimization variables
+    n1w, n2w = 5, 5 # number of neurons in convex function not dependent of optimization variables
     
     def oracle(U,P):
         return f(U[:,0],U[:,1],P)
@@ -91,75 +99,63 @@ else:
     X = np.hstack((U,P))
     
     n1,n2 = 10,10  # number of neurons in convex function
-    n1w, n2w = 0, 0 # number of neurons in convex function not dependent of optimization variables
+    n1w, n2w = 5, 5 # number of neurons in neural network generating bias terms from parameters
     
 nx = nu+npar  # number of inputs
 
-n_convex = 18 # number of weights in convex fcn
+n_convex = 5 # number of weights in convex fcn
+n_bias = 8 # number of weights in neural network generating bias terms from parameters
+
+I_convex = range(n_convex)
+I_bias = range(n_convex,n_convex+n_bias)
 
 parallel_training = parallels_seeds > 1
 
-tau_th = 0.*0.001 # L1-regularization term
-zero_coeff = 1.e-4 # small coefficients are set to zero when L1-regularization is used
+@jax.jit
+def bias_fcn(p,params_bias):
+    W1, b1, W2w, W2p, b2, W3w, W3p, b3 = params_bias
+    z1 = act(W1 @ p.T + b1)
+    z2 = act(W2w @ z1 + W2p @ p.T + b2)
+    b = W3w @ z2 + W3p @ p.T + b3
+    return b.T
 
-ny = 1 # number of outputs
-
-# input convex function model [Amos, Xu, Kolter, 2017]
-def act(x):    
-    return jnp.logaddexp(0.,x) # = log(1+exp(x)): activation function, must be convex and non decreasing on the domain of interest
-
+bias_dims = [[n1w, npar], [n1w,1], [n2w, n1w], [n2w, npar], [n2w,1], [n1+n2+ny, n2w],  [n1+n2+ny, npar], [n1+n2+ny,1]]
+        
 @jax.jit
 def convex_fcn(x,params):
-    W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3, W1wp, b1w, W2w, W2zw, W2pw, b2w, W3w = params
-    v=x[:,:nu]
+    W1, W2z, W2u, W3z, W3u = params[:n_convex]
+    params_bias = params[n_convex:]
+    u=x[:,:nu]
     p=x[:,nu:]
-    z1 = act(W1v @ v.T + W1p @ p.T + b1)
-    w1 = act(W1wp @ p.T + b1w)
-    z2 = act(W2z @ z1 + W2v @ v.T + W2p @ p.T + b2 + W2w @ w1)
-    w2 = act(W2zw @ w1 + W2pw @ p.T + b2w)
-    y = W3z @ z2 + W3v @ v.T + W3p @ p.T + b3 + W3w @ w2
+    b = bias_fcn(p,params_bias)
+    z1 = act(W1 @ u.T + b[:,:n1].T)
+    z2 = act(W2z @ z1 + W2u @ u.T + b[:,n1:n1+n2].T)
+    y = W3z @ z2 + W3u @ u.T + b[:,-ny:].T
     return y.T
 
 model = StaticModel(ny, nx, convex_fcn) 
 
 def init_fcn(seed):
     np.random.seed(seed)
-    params = [
-        np.random.randn(n1, nu),  # W1v 
-        np.random.randn(n1, npar),  # W1p
-        np.random.randn(n1, 1),  # b2
+    params_convex = [
+        np.random.randn(n1, nu),  # W1 
         np.random.rand(n2, n1),  # W2z (constrained >= 0)
-        np.random.randn(n2, nu),  # W2v 
-        np.random.randn(n2, npar),  # W2p
-        np.random.randn(n2, 1),  # b2
+        np.random.randn(n2, nu),  # W2u 
         np.random.rand(ny, n2),  # W3z (constrained >= 0)
-        np.random.randn(ny, nu),  # W3v (this is unconstrained, as the last layer is linear)
-        np.random.randn(ny, npar),  # W3p
-        np.random.randn(ny, 1),  # b3
-
-        np.random.randn(n1w, npar),  # W1wp 
-        np.random.randn(n1w, 1),  # b1w
-        np.random.randn(n2, n1w),  # W2w 
-        np.random.randn(n2w, n1w),  # W2zw 
-        np.random.randn(n2w, npar),  # W2pw 
-        np.random.randn(n2w, 1),  # b2w 
-        np.random.randn(ny, n2w),  # W3w 
-    ]
-    
-    return params
+        np.random.randn(ny, nu)  # W3u (this is unconstrained, as the last layer 
+        ]
+    params_bias = [np.random.randn(d[0], d[1]) for d in bias_dims]
+    return params_convex + params_bias
 
 model.init(params=init_fcn(4))
 
 # ##############
 # define lower bounds for parameters
-params_min = [-np.inf*np.ones((n1,nu)), -np.inf*np.ones((n1,npar)), -np.inf*np.ones((n1,1)),
-              np.zeros((n2,n1)), -np.inf*np.ones((n2,nu)), -np.inf*np.ones((n2,npar)), -np.inf*np.ones((n2,1)),
-              np.zeros((ny,n2)), -np.inf*np.ones((ny,nu)), -np.inf*np.ones((ny,npar)), -np.inf*np.ones((ny,1)),
-              
-              -np.inf*np.ones((n1w, npar)), -np.inf*np.ones((n1w, 1)), -np.inf*np.ones((n2, n1w)), 
-              -np.inf*np.ones((n2w, n1w)), -np.inf*np.ones((n2w, npar)), -np.inf*np.ones((n2w, 1)), 
-              -np.inf*np.ones((ny, n2w))  
-]
+params_convex_min = [-np.inf*np.ones((n1,nu)), np.zeros((n2,n1)), -np.inf*np.ones((n2,nu)), 
+              np.zeros((ny,n2)), -np.inf*np.ones((ny,nu))]
+params_bias_min = params_bias = [-np.inf*np.ones((d[0], d[1])) for d in bias_dims]
+
+params_min = params_convex_min + params_bias_min
 #params_min = None
 params_max = None # no upper bounds
 
@@ -189,21 +185,18 @@ print(f"R2 score on (u,p) -> y mapping:         {R2}")
     
 # #########################
 # Convexity check in CVXPY
-v_cvx = cp.Variable((nu, 1))
+u_cvx = cp.Variable((nu, 1))
 p_cvx = cp.Parameter((npar, 1))
 def create_convex_fcn(params):
-    W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3, W1wp, b1w, W2w, W2zw, W2pw, b2w, W3w = params
-    z1 = cp.logistic(W1v @ v_cvx + W1p @ p_cvx + b1)
-    if  n1w>0:
-        w1 = cp.logistic(W1wp @ p_cvx + b1w)
-    else:
-        w1 = np.zeros((0,1))
-    z2 = cp.logistic(W2z @ z1 + W2v @ v_cvx + W2p @ p_cvx + b2 + W2w @ w1)
-    if n2w>0:
-        w2 = cp.logistic(W2zw @ w1 + W2pw @ p_cvx + b2w)
-    else:
-        w2 = np.zeros((0,1))
-    y = W3z @ z2 + W3v @ v_cvx + W3p @ p_cvx + b3 + W3w @ w2
+    W1b, b1b, W2wb, W2pb, b2b, W3wb, W3pb, b3b = params[-n_bias:]
+    z1 = cp.logistic(W1b @ p_cvx + b1b)
+    z2 = cp.logistic(W2wb @ z1 + W2pb @ p_cvx + b2b)
+    b = W3wb @ z2 + W3pb @ p_cvx + b3b
+    
+    W1, W2z, W2u, W3z, W3u = params[:n_convex]
+    z1 = cp.logistic(W1 @ u_cvx + b[:n1])
+    z2 = cp.logistic(W2z @ z1 + W2u @ u_cvx + b[n1:n1+n2])
+    y = W3z @ z2 + W3u @ u_cvx + b[-ny:]
     return y
 cvx_fun = create_convex_fcn(model.params)
 print(f'cvxpy expressions is {"DCP" if cvx_fun.is_dcp() else "non-DCP"}')
@@ -211,15 +204,15 @@ print(f'cvxpy expressions is {"DPP" if cvx_fun.is_dpp() else "non-DPP"}')
 # #########################
 
 if example=='2d':
-    constr = [v_cvx<=2.*np.ones((nu,1)), 
-                v_cvx>=-2.*np.ones((nu,1))]
+    constr = [u_cvx<=2.*np.ones((nu,1)), 
+                u_cvx>=-2.*np.ones((nu,1))]
 else:
     pass #! TODO
 cvx_prob = cp.Problem(cp.Minimize(cvx_fun), constr)
 def solve_cvx_problem(cvx_prob,p):
     p_cvx.value = np.array(p).reshape(npar,1)
     cvx_prob.solve()
-    return v_cvx.value
+    return u_cvx.value
 
 useActiveSampling = M>0
 
@@ -240,7 +233,6 @@ if useActiveSampling:
     cvx_fun = create_convex_fcn(model.params)
     cvx_prob = cp.Problem(cp.Minimize(cvx_fun), constr)
 
-W1v, W1p, b1, W2z, W2v, W2p, b2, W3z, W3v, W3p, b3, W1wp, b1w, W2w, W2zw, W2pw, b2w, W3w = model.params
 if tau_th > 0:
     print(model.sparsity_analysis())
 
