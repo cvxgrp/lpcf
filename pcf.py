@@ -22,36 +22,25 @@ if not jax.config.jax_enable_x64:
 ACTIVATIONS = {
     'relu':     {'jax': lambda x: jnp.maximum(0.,x),    'cvxpy': lambda x: cp.maximum(0.,x)},
     'logistic': {'jax': lambda x: jnp.logaddexp(0.,x),  'cvxpy': lambda x: cp.logistic(x)},
+    'leaky-relu': {'jax': lambda x: jnp.maximum(0.1*x,x),  'cvxpy': lambda x: cp.maximum(0.1*x,x)},
 }
-
-# TODO: replace hard-coded dimensions with parametric dimensions
-n1,n2 = 10,10  # number of neurons in convex function
-n1w, n2w = 5, 5
-n_convex = 5 # number of weights in convex fcn
-n_bias = 8
-
 
 class PCF:
     
-    def __init__(self, L, n_, K, m_, activation_variable='relu', activation_parameter='relu'):
+    def __init__(self, widths_variable=2, widths_parameter=2, activation_variable='relu', activation_parameter='relu'):
         
-        # check that n_ has length L and m_ has length L
-        if len(n_) != L:
-            raise ValueError('list of layer widths of variable network must have length L')
-        if len(m_) != K:
-            raise ValueError('list of layer widths of parameter network must have length K')
         
         # initialize structure
-        self.L = L
-        self.n_ = n_
-        self.K = K
-        self.m_ = m_
+        self.L_variable = len(widths_variable)
+        self.widths_variable = widths_variable
+        self.L_parameter = len(widths_parameter)
+        self.widths_parameter = widths_parameter
+        self.n_convex = None
+        self.n_bias = None
         
-        self.nx = n_[0]
-        self.nt = m_[0]
-        self.ny = n_[-1]
-        
-        self.bias_dims = [[n1w, self.nt], [n1w,1], [n2w, n1w], [n2w, self.nt], [n2w,1], [n1+n2+self.ny, n2w],  [n1+n2+self.ny, self.nt], [n1+n2+self.ny,1]]
+        self.nx = None # inferred later by dataset
+        self.nt = None # inferred later by dataset
+        self.ny = None # inferred later by dataset
         
         self.act_var_jax = ACTIVATIONS[activation_variable]['jax']
         self.act_var_cvxpy = ACTIVATIONS[activation_variable]['cvxpy']
@@ -68,55 +57,83 @@ class PCF:
         
         np.random.seed(seed)
         
-        weights_variable = [
-            np.random.randn(n1, self.nx),  # W1 
-            np.random.rand(n2, n1),  # W2z (constrained >= 0)
-            np.random.randn(n2, self.nx),  # W2u 
-            np.random.rand(self.ny, n2),  # W3z (constrained >= 0)
-            np.random.randn(self.ny, self.nx)  # W3u (this is unconstrained, as the last layer 
-            ]
-        weights_parameter = [np.random.randn(d[0], d[1]) for d in self.bias_dims]
+        weights_variable=[np.random.randn(self.widths_variable[0], self.nx)] # W1
+        for i in range(1,self.L_variable):
+            weights_variable.append(np.random.rand(self.widths_variable[i], self.widths_variable[i-1]))
+            weights_variable.append(np.random.randn(self.widths_variable[i], self.nx))
+        weights_variable.append(np.random.rand(self.ny, self.widths_variable[-1]))
+        weights_variable.append(np.random.randn(self.ny, self.nx))
+
+        weights_parameter=[np.random.randn(self.widths_parameter[0], self.nt), np.random.randn(self.widths_parameter[0], 1)]
+        for i in range(1,self.L_parameter):
+            weights_parameter.append(np.random.randn(self.widths_parameter[i], self.widths_parameter[i-1]))
+            weights_parameter.append(np.random.randn(self.widths_parameter[i], self.nt))
+            weights_parameter.append(np.random.randn(self.widths_parameter[i], 1))
+        weights_parameter.append(np.random.randn(self.nbias, self.widths_parameter[-1]))
+        weights_parameter.append(np.random.randn(self.nbias, self.nt))
+        weights_parameter.append(np.random.randn(self.nbias, 1))
+
         self.model_weights = weights_variable + weights_parameter
+        self.n_convex = len(weights_variable)
+        self.n_bias = len(weights_parameter)
         return self.model_weights
             
+    def _init_lower_bounds(self):
+        self.weights_min = [-np.inf*np.ones(w.shape) for w in self.model_weights]
+        for i in range(1,self.L_variable+1):
+            self.weights_min[2*i-1] = np.zeros(self.weights_min[2*i-1].shape)
+        return self.weights_min
     
     def _setup_model(self, seed=0):
         """Initialize variable and parameter networks."""
-                
+        
         @jax.jit
         def _parameter_fcn(theta, weights_parameter):
-            W1, b1, W2w, W2p, b2, W3w, W3p, b3 = weights_parameter
-            z1 = self.act_param_jax(W1 @ theta.T + b1)
-            z2 = self.act_param_jax(W2w @ z1 + W2p @ theta.T + b2)
-            b = W3w @ z2 + W3p @ theta.T + b3
+            # weights_parameter = [W1p,b1,W2z,W2p,b2,...,WKz,WKp,bK]   K = int((len(weights_parameter)-2)/3+1)
+            b = self.act_param_jax(weights_parameter[0]@theta.T+weights_parameter[1])
+            for j in range(self.L_parameter-1):
+                b = self.act_param_jax(weights_parameter[2+3*j]@b+weights_parameter[3+3*j]@theta.T+weights_parameter[4+3*j])
+            b = weights_parameter[-3]@b+weights_parameter[-2]@theta.T+weights_parameter[-1]
             return b.T
         
         @jax.jit
         def _variable_fcn(xtheta, weights):
             x = xtheta[:, :self.nx]
             theta = xtheta[:, self.nx:]
-            W1, W2z, W2u, W3z, W3u = weights[:n_convex]
-            weights_parameter = weights[n_convex:]
-            omega = _parameter_fcn(theta, weights_parameter)
-            z1 = self.act_var_jax(W1 @ x.T + omega[:,:n1].T)
-            z2 = self.act_var_jax(W2z @ z1 + W2u @ x.T + omega[:,n1:n1+n2].T)
-            y = W3z @ z2 + W3u @ x.T + omega[:,-self.ny:].T
+            # weights[:n_convex] = [W1x,W2z,W2x,...,WLz,WLx]  L_variable = int((len(weights_convex)-2)/3+1)
+            weights_parameter = weights[self.n_convex:]
+            b = _parameter_fcn(theta, weights_parameter)
+
+            n1 = self.widths_variable[0]
+            y = self.act_var_jax(weights[0] @ x.T + b[:,:n1].T)            
+            for j in range(self.L_variable-1):
+                n2 = self.widths_variable[j+1] + n1
+                y = self.act_var_jax(weights[1+2*j] @ y + weights[2+2*j] @ x.T + b[:,n1:n2].T)
+                n1 = n2
+            y = weights[self.n_convex-2]@y+weights[self.n_convex-1]@x.T+ b[:,n1:].T
             return y.T
         
         self.model = StaticModel(self.ny, self.nx + self.nt, _variable_fcn)
-        self.model.init(params=self._init_weights(seed))
-        
-        params_convex_min = [-np.inf*np.ones((n1, self.nx)), np.zeros((n2,n1)), -np.inf*np.ones((n2,self.nx)), 
-                    np.zeros((self.ny,n2)), -np.inf*np.ones((self.ny,self.nx))]
-        params_bias_min = [-np.inf*np.ones((d[0], d[1])) for d in self.bias_dims]
-        
-        self.model_weights_min = params_convex_min + params_bias_min
-        
+        self.model.init(params=self._init_weights(seed))        
+        self.model_weights_min = self._init_lower_bounds()        
     
-    def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=1.e-3, zero_coeff=1.e-4, cores=1, adam_epochs=1000, lbfgs_epochs=2000, seed=0):
+    def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=1.e-3, zero_coeff=1.e-4, cores=1, adam_epochs=1000, lbfgs_epochs=1000, seed=0):
         
-        N = Y.shape[0]
-        
+        if Y.ndim == 1:
+            # single output
+            Y = Y.reshape(-1, 1)
+        if X.ndim == 1:
+            # single input
+            X = X.reshape(-1, 1)
+        if Theta.ndim == 1:
+            # single parameter
+            Theta = Theta.reshape(-1, 1)
+            
+        N, self.ny = Y.shape
+        self.nx = X.shape[1]
+        self.nt = Theta.shape[1]
+        self.nbias = sum(self.widths_variable)+self.ny
+
         self._setup_model(seed)
         
         self.model.optimization(
@@ -150,21 +167,32 @@ class PCF:
         
     
     def tocvxpy(self, x: cp.Variable, theta: cp.Parameter) -> cp.Expression:
-        
-        W1b, b1b, W2wb, W2pb, b2b, W3wb, W3pb, b3b = self.model_weights[-n_bias:]
-        z1 = self.act_param_cvxpy(W1b @ theta + b1b)
-        z2 = self.act_param_cvxpy(W2wb @ z1 + W2pb @ theta + b2b)
-        omega = W3wb @ z2 + W3pb @ theta + b3b
-        
-        W1, W2z, W2u, W3z, W3u = self.model_weights[:n_convex]
-        z1 = self.act_var_cvxpy(W1 @ x + omega[:n1])
-        z2 = self.act_var_cvxpy(W2z @ z1 + W2u @ x + omega[n1:n1+n2])
-        y = W3z @ z2 + W3u @ x + omega[-self.ny:]
-        
+        # Evaluate bias terms
+        weights_parameter = self.model_weights[self.n_convex:]
+        b = self.act_param_cvxpy(weights_parameter[0]@theta+weights_parameter[1])
+        for j in range(self.L_parameter-1):
+            b = self.act_param_cvxpy(weights_parameter[2+3*j]@b+weights_parameter[3+3*j]@theta+weights_parameter[4+3*j])
+        b = weights_parameter[-3]@b+weights_parameter[-2]@theta+weights_parameter[-1]
+
+        # Evaluate convex objective function(s)
+        n1 = self.widths_variable[0]
+        y = self.act_var_cvxpy(self.model_weights[0] @ x + b[:n1])            
+        for j in range(self.L_variable-1):
+            n2 = self.widths_variable[j+1] + n1
+            y = self.act_var_cvxpy(self.model_weights[1+2*j] @ y + self.model_weights[2+2*j] @ x + b[n1:n2])
+            n1 = n2
+        y = self.model_weights[self.n_convex-2]@y+self.model_weights[self.n_convex-1]@x+ b[n1:]
         return y
 
-    
     def tojax(self):
-        
-        # return existing jax function
-        pass
+        @jax.jit
+        def fcn_jax(x,theta,params):
+            if x.ndim == 1:
+                # single input
+                x = x.reshape(-1, 1)
+            if theta.ndim == 1:
+                # single parameter
+                theta = theta.reshape(-1, 1)
+            xtheta = jnp.hstack((x,theta))
+            return self.model.output_fcn(xtheta, params)
+        return fcn_jax, self.model.params

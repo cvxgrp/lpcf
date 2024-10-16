@@ -10,7 +10,6 @@ import jax
 import jax.numpy as jnp
 from jax_sysid.utils import compute_scores
 import cvxpy as cp
-import flax.linen as nn
 import jaxopt
 from functools import partial
 from pcf import PCF
@@ -23,8 +22,6 @@ if not jax.config.jax_enable_x64:
 plotfigs = True # set to True to plot figures
 parallels_seeds = 10 # number of parallel training sessions (parallel_seeds = 1 means no parallel training)
 N = 5000 # number of training data points
-wy=1. # weight on fitting y (output function)
-wu=0.1 # weight on fitting u (autoencoder) during training of the entire output + autoencoder functions
 # M=1000 # additional active learning samples (0=no active learning)
 M=0 # no active learning
 weight_a = 10. # weight on new active samples (only used if M>0)
@@ -52,23 +49,21 @@ X = np.random.rand(N,nu+npar)*np.array([4.,4.,2.])+np.array([-2.,-2.,-1.]) # sam
 U1, U2, P = X.T
 Y = f(U1,U2,P)
 
-U = np.vstack((U1,U2)).T
+#! TBD: add example where data are standard scaled first
 
-n1,n2 = 10,10  # number of neurons in convex function
-n1w, n2w = 5, 5 # number of neurons in convex function not dependent of optimization variables
+U = np.vstack((U1,U2)).T
 
 def oracle(U,P):
     return f(U[:,0],U[:,1],P)
-
-n1w, n2w = 5, 5 # number of neurons in neural network generating bias terms from parameters
-    
+   
 nx = nu+npar  # number of inputs
 
-n_convex = 5 # number of weights in convex fcn
-n_bias = 8 # number of weights in neural network generating bias terms from parameters
+pcf = PCF(widths_variable=[10,10], widths_parameter=[5,5], activation_variable='logistic', activation_parameter='logistic')
+stats = pcf.fit(Y, U, P, tau_th=tau_th, zero_coeff=zero_coeff, cores=parallels_seeds, seed=4, adam_epochs=1000, lbfgs_epochs=1000)
 
-pcf = PCF(L=4, n_=[nu,n1,n2,1], K=3, m_=[npar,n1w,n2w], activation_variable='logistic', activation_parameter='logistic')
-stats = pcf.fit(Y, U, P, tau_th=tau_th, zero_coeff=zero_coeff, cores=parallels_seeds, seed=4)
+f_jax, weights = pcf.tojax() # get the jax function and parameters: y = f_jax(x,theta,params)
+YHAT = f_jax(U, P, weights) # predict the output for the training data
+# YHAT2 = pcf.model.output_fcn(X,pcf.model.params) = YHAT
 
 print(f"Elapsed time: {stats['time']} s")
 print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
@@ -124,7 +119,7 @@ if plotfigs:
     plt.rcParams['font.size'] = 10
 
     def fhat(U1,U2,p):
-        return pcf.model.predict(np.hstack([U1.reshape(-1,1),U2.reshape(-1,1),p*np.ones(U1.size).reshape(-1,1)]))[:,:ny]
+        return f_jax(np.hstack((U1.reshape(-1,1),U2.reshape(-1,1))),p*np.ones((U1.size,1)), weights)
         
     U1, U2 = np.meshgrid(np.linspace(-2.,2.,100),np.linspace(-2.,2.,100))
 
@@ -150,3 +145,5 @@ if plotfigs:
         i+=1
     plt.show()
 
+# Check if CVXPY and JAX predictions are the same
+assert np.abs(f_cvx.value-np.array(f_jax(x_cvx.value.reshape(1,-1),theta_cvx.value.reshape(1,-1), weights)))<=1.e-12, "Error in cvxpy and jax predictions"
