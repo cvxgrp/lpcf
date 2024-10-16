@@ -117,7 +117,7 @@ class PCF:
         self.model.init(params=self._init_weights(seed))        
         self.model_weights_min = self._init_lower_bounds()        
     
-    def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=1.e-3, zero_coeff=1.e-4, cores=1, adam_epochs=1000, lbfgs_epochs=1000, seed=0):
+    def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=1.e-3, zero_coeff=1.e-4, seeds=0, cores=1, adam_epochs=1000, lbfgs_epochs=1000):
         
         if Y.ndim == 1:
             # single output
@@ -128,13 +128,16 @@ class PCF:
         if Theta.ndim == 1:
             # single parameter
             Theta = Theta.reshape(-1, 1)
+        
+        if not isinstance(seeds, np.ndarray):
+            seeds=np.array(seeds)
             
         N, self.ny = Y.shape
         self.nx = X.shape[1]
         self.nt = Theta.shape[1]
         self.nbias = sum(self.widths_variable)+self.ny
 
-        self._setup_model(seed)
+        self._setup_model(seeds[0])
         
         self.model.optimization(
             adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs,
@@ -151,7 +154,7 @@ class PCF:
         t = time.time()
         XTheta = np.hstack((X.reshape(N, self.nx), Theta.reshape(N, self.nt)))
         if cores > 1:
-            models=self.model.parallel_fit(Y, XTheta, self._init_weights, seeds=range(cores), n_jobs=cores)
+            models=self.model.parallel_fit(Y, XTheta, self._init_weights, seeds=seeds, n_jobs=cores)
             R2s = [np.sum(compute_scores(Y, m.predict(XTheta.reshape(-1, self.nx + self.nt)), None, None, fit='R2')[0]) for m in models]
             ibest = np.argmax(R2s)
             self.model.params = models[ibest].params

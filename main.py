@@ -20,7 +20,8 @@ if not jax.config.jax_enable_x64:
 
 # ################################
 plotfigs = True # set to True to plot figures
-parallels_seeds = 10 # number of parallel training sessions (parallel_seeds = 1 means no parallel training)
+seeds = np.arange(10) # seeds to use for initial condition during training
+cores=10 # number of cores to use
 N = 5000 # number of training data points
 # M=1000 # additional active learning samples (0=no active learning)
 M=0 # no active learning
@@ -59,7 +60,7 @@ def oracle(U,P):
 nx = nu+npar  # number of inputs
 
 pcf = PCF(widths_variable=[10,10], widths_parameter=[5,5], activation_variable='logistic', activation_parameter='logistic')
-stats = pcf.fit(Y, U, P, tau_th=tau_th, zero_coeff=zero_coeff, cores=parallels_seeds, seed=4, adam_epochs=1000, lbfgs_epochs=1000)
+stats = pcf.fit(Y, U, P, tau_th=tau_th, zero_coeff=zero_coeff, seeds=seeds, cores=cores, adam_epochs=1000, lbfgs_epochs=1000)
 
 f_jax, weights = pcf.tojax() # get the jax function and parameters: y = f_jax(x,theta,params)
 YHAT = f_jax(U, P, weights) # predict the output for the training data
