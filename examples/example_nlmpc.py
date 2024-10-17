@@ -21,8 +21,6 @@ if not jax.config.jax_enable_x64:
 # ################################
 plotfigs = True # set to True to plot figures
 cores = 10 # number of parallel training sessions (cores = 1 means no parallel training)
-seeds = np.arange(10) # seeds to use for initial condition during training
-N = 10000 # number of training data points
 # M=1000 # additional active learning samples (0=no active learning)
 M=0 # no active learning
 weight_a = 10. # weight on new active samples (only used if M>0)
@@ -33,25 +31,48 @@ def act(x):
     return jnp.logaddexp(0.,x) # = log(1+exp(x)): activation function, must be convex and non decreasing on the domain of interest
 ny = 1 # number of outputs
 seed = 4 # for reproducibility of results
+use_nonlinear_model = True
+
+if use_nonlinear_model:
+    N = 10000 # number of training data points
+    a1=1. # cost term for integral action
+    a2=0.001 # cost term for input rate
+    widths_variable=[10,10]
+    widths_parameter=[30,30]
+    rho_th=1.e-3
+    seeds = np.arange(10) # seeds to use for initial condition during training
+    adam_epochs=5000
+    lbfgs_epochs=5000 
+else:
+    N = 10000 # number of training data points
+    a1=.1
+    a2=0.001
+    widths_variable=[10,10]
+    widths_parameter=[10,10]
+    rho_th=1.e-3
+    seeds = np.arange(10) # seeds to use for initial condition during training
+    adam_epochs=1000
+    lbfgs_epochs=2000 
 # ################################
 
 np.random.seed(seed)
 
 @jax.jit
 def prediction_model(x, u):
-    # # Nonlinear system, cost function should be nonconvex
-    # xnext = jnp.array([.5*jnp.sin(x[0]) + .3*u * jnp.cos(x[1]/2.),
-    #         .6*jnp.sin(x[0]+x[2]) -.4*u * jnp.arctan(x[0]+x[1]),
-    #         .4*jnp.exp(-x[1]) + .5*u * jnp.sin(-x[0]/2.)])
-    # y = jnp.arctan(jnp.array([.5*jnp.sin(x[0]), -.5, 1])@x**3)
-    
-    # Linear system, cost function should be quadratic
-    xnext = jnp.array([.5*x[0] + .3*u + .5*x[1],
-            .2*x[2] -.4*u + .3*x[0]-.5*x[1],
-            -.4*x[1] + .5*u -.5*x[0]])
-    y = jnp.array([.5, -.5, 1])@x
+    if use_nonlinear_model:
+        # Nonlinear system, cost function should be nonconvex
+        xnext = jnp.array([.2*x[0]+.1*jnp.sin(x[0]/10.) + .3*u + .5*x[1],
+                .2*x[2] -.4*u + .3*x[0]-.5*x[1],
+                -.4*x[1] + .5*u*(1.+jnp.log(1+x[2]/10.)) -.3*x[0]])
+        y = jnp.array([.5, -.5, 1])@(x+x**3/10.)
+    else:    
+        # Linear system, cost function should be quadratic
+        xnext = jnp.array([.5*x[0] + .3*u + .5*x[1],
+                .2*x[2] -.4*u + .3*x[0]-.5*x[1],
+                -.4*x[1] + .5*u -.5*x[0]])
+        y = jnp.array([.5, -.5, 1])@x
     return xnext, y
-
+    
 @jax.jit
 def prediction(x, U):    
     _, Y = jax.lax.scan(prediction_model, jnp.array(x), U)
@@ -60,7 +81,7 @@ def prediction(x, U):
 def loss_single(U, x0, r, uold, integral):
     Ypred = prediction(x0, U)
     Intpred = jnp.cumsum(Ypred-r)+integral
-    loss = jnp.sum((Ypred-r)**2) + .1*jnp.sum(Intpred**2) + 0.001*((U[0]-uold)**2+jnp.sum(jnp.diff(U)**2))
+    loss = jnp.sum((Ypred-r)**2) + a1*jnp.sum(Intpred**2) + a2*((U[0]-uold)**2+jnp.sum(jnp.diff(U)**2))
     return loss[0]
 
 loss = jax.jit(jax.vmap(loss_single, in_axes=(0,0,0,0,0)))
@@ -96,8 +117,8 @@ Y, ymean, ygain = standard_scale(Y.reshape(-1,1))
 P = np.hstack((X0,R,UOLD, INT))
 npar = P.shape[1] # number of states + output references + previous input
 
-pcf = PCF(widths_variable=[10,10], widths_parameter=[10,10], activation_variable='logistic', activation_parameter='swish')
-stats = pcf.fit(Y, U, P, rho_th=1.e-3, tau_th=tau_th, zero_coeff=zero_coeff, cores=cores, seeds=seeds, adam_epochs=1000, lbfgs_epochs=2000)
+pcf = PCF(widths_variable=widths_variable, widths_parameter=widths_parameter, activation_variable='logistic', activation_parameter='swish')
+stats = pcf.fit(Y, U, P, rho_th=rho_th, tau_th=tau_th, zero_coeff=zero_coeff, cores=cores, seeds=seeds, adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
 
 f_jax, weights = pcf.tojax() # get the jax function and parameters: y = f_jax(x,theta,params)
 YHAT = f_jax(U, P, weights) # predict the output for the training data
