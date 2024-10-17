@@ -8,6 +8,7 @@ A. Bemporad, M. Schaller, October 15, 2024
 import time
 import numpy as np
 import cvxpy as cp
+from typing import Callable
 from jax_sysid.models import StaticModel
 from jax_sysid.utils import compute_scores
 import jax.numpy as jnp
@@ -20,9 +21,9 @@ if not jax.config.jax_enable_x64:
 
 # registry of activation functions, with their jax and cvxpy implementations
 ACTIVATIONS = {
-    'relu':     {'jax': lambda x: jnp.maximum(0.,x),    'cvxpy': lambda x: cp.maximum(0.,x)},
-    'logistic': {'jax': lambda x: jnp.logaddexp(0.,x),  'cvxpy': lambda x: cp.logistic(x)},
-    'leaky-relu': {'jax': lambda x: jnp.maximum(0.1*x,x),  'cvxpy': lambda x: cp.maximum(0.1*x,x)},
+    'relu':         {'jax': lambda x: jnp.maximum(0.,x),    'cvxpy': lambda x: cp.maximum(0.,x),    'numpy': lambda x: np.maximum(0.,x)},
+    'logistic':     {'jax': lambda x: jnp.logaddexp(0.,x),  'cvxpy': lambda x: cp.logistic(x),      'numpy': lambda x: np.logaddexp(0.,x)},
+    'leaky-relu':   {'jax': lambda x: jnp.maximum(0.1*x,x), 'cvxpy': lambda x: cp.maximum(0.1*x,x), 'numpy': lambda x: np.maximum(0.1*x,x)},
 }
 
 class PCF:
@@ -44,8 +45,10 @@ class PCF:
         
         self.act_var_jax = ACTIVATIONS[activation_variable]['jax']
         self.act_var_cvxpy = ACTIVATIONS[activation_variable]['cvxpy']
+        self.act_var_numpy = ACTIVATIONS[activation_variable]['numpy']
         self.act_param_jax = ACTIVATIONS[activation_parameter]['jax']
         self.act_param_cvxpy = ACTIVATIONS[activation_parameter]['cvxpy']
+        self.act_param_numpy = ACTIVATIONS[activation_parameter]['numpy']
         
         self.model = None
         self.model_weights = None
@@ -167,6 +170,19 @@ class PCF:
 
         self.model_weights = self.model.params
         return {'time': t, 'R2': R2, 'msg': msg}
+    
+    
+    def tonumpy_parameter_model(self) -> Callable:
+        
+        def b(theta):
+            weights_parameter = self.model_weights[self.n_convex:]
+            out = self.act_param_numpy(weights_parameter[0] @ theta + weights_parameter[1])
+            for j in range(self.L_parameter - 1):
+                out = self.act_param_numpy(weights_parameter[2+3*j]@out+weights_parameter[3+3*j]@theta+weights_parameter[4+3*j])
+            out = weights_parameter[-3]@out+weights_parameter[-2]@theta+weights_parameter[-1]
+            return out
+        
+        return b
         
     
     def tocvxpy(self, x: cp.Variable, theta: cp.Parameter) -> cp.Expression:
