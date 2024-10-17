@@ -21,9 +21,10 @@ if not jax.config.jax_enable_x64:
 
 # registry of activation functions, with their jax and cvxpy implementations
 ACTIVATIONS = {
-    'relu':         {'jax': lambda x: jnp.maximum(0.,x),    'cvxpy': lambda x: cp.maximum(0.,x),    'numpy': lambda x: np.maximum(0.,x)},
-    'logistic':     {'jax': lambda x: jnp.logaddexp(0.,x),  'cvxpy': lambda x: cp.logistic(x),      'numpy': lambda x: np.logaddexp(0.,x)},
-    'leaky-relu':   {'jax': lambda x: jnp.maximum(0.1*x,x), 'cvxpy': lambda x: cp.maximum(0.1*x,x), 'numpy': lambda x: np.maximum(0.1*x,x)},
+    'relu':         {'jax': lambda x: jnp.maximum(0.,x),    'cvxpy': lambda x: cp.maximum(0.,x),    'numpy': lambda x: np.maximum(0.,x),        'convex_increasing': True},
+    'logistic':     {'jax': lambda x: jnp.logaddexp(0.,x),  'cvxpy': lambda x: cp.logistic(x),      'numpy': lambda x: np.logaddexp(0.,x),      'convex_increasing': True},
+    'leaky-relu':   {'jax': lambda x: jnp.maximum(0.1*x,x), 'cvxpy': lambda x: cp.maximum(0.1*x,x), 'numpy': lambda x: np.maximum(0.1*x,x),     'convex_increasing': True},
+    'swish':        {'jax': lambda x: jax.nn.swish(x),      'cvxpy': lambda x: x/(1. + cp.exp(cp.minimum(-x, 100.))),    'numpy': lambda x: x/(1. + np.exp(np.minimum(-x, 100.))),   'convex_increasing': False},
 }
 
 class PCF:
@@ -42,6 +43,9 @@ class PCF:
         self.nx = None # inferred later by dataset
         self.nt = None # inferred later by dataset
         self.ny = None # inferred later by dataset
+        
+        if ACTIVATIONS[activation_variable]['convex_increasing'] == False:
+            raise ValueError('Activation function for variable network must be convex and increasing')
         
         self.act_var_jax = ACTIVATIONS[activation_variable]['jax']
         self.act_var_cvxpy = ACTIVATIONS[activation_variable]['cvxpy']
@@ -172,26 +176,32 @@ class PCF:
         return {'time': t, 'R2': R2, 'msg': msg}
     
     
-    def tonumpy_parameter_model(self) -> Callable:
+    def generate_compute_param(self) -> Callable:
         
+        @jax.jit
         def b(theta):
             weights_parameter = self.model_weights[self.n_convex:]
-            out = self.act_param_numpy(weights_parameter[0] @ theta + weights_parameter[1])
+            out = self.act_param_jax(weights_parameter[0] @ theta + weights_parameter[1])
             for j in range(self.L_parameter - 1):
-                out = self.act_param_numpy(weights_parameter[2+3*j]@out+weights_parameter[3+3*j]@theta+weights_parameter[4+3*j])
+                out = self.act_param_jax(weights_parameter[2+3*j]@out+weights_parameter[3+3*j]@theta+weights_parameter[4+3*j])
             out = weights_parameter[-3]@out+weights_parameter[-2]@theta+weights_parameter[-1]
             return out
         
         return b
         
     
-    def tocvxpy(self, x: cp.Variable, theta: cp.Parameter) -> cp.Expression:
-        # Evaluate bias terms
-        weights_parameter = self.model_weights[self.n_convex:]
-        b = self.act_param_cvxpy(weights_parameter[0]@theta+weights_parameter[1])
-        for j in range(self.L_parameter-1):
-            b = self.act_param_cvxpy(weights_parameter[2+3*j]@b+weights_parameter[3+3*j]@theta+weights_parameter[4+3*j])
-        b = weights_parameter[-3]@b+weights_parameter[-2]@theta+weights_parameter[-1]
+    def tocvxpy(self, x: cp.Variable, theta: cp.Parameter=None) -> cp.Expression:
+        
+        if theta is None:
+            b = cp.Parameter((self.nbias, 1))
+        else:
+            # TODO: catch if activation is non-monotonic
+            # Evaluate bias terms
+            weights_parameter = self.model_weights[self.n_convex:]
+            b = self.act_param_cvxpy(weights_parameter[0]@theta+weights_parameter[1])
+            for j in range(self.L_parameter-1):
+                b = self.act_param_cvxpy(weights_parameter[2+3*j]@b+weights_parameter[3+3*j]@theta+weights_parameter[4+3*j])
+            b = weights_parameter[-3]@b+weights_parameter[-2]@theta+weights_parameter[-1]
 
         # Evaluate convex objective function(s)
         n1 = self.widths_variable[0]
@@ -201,7 +211,15 @@ class PCF:
             y = self.act_var_cvxpy(self.model_weights[1+2*j] @ y + self.model_weights[2+2*j] @ x + b[n1:n2])
             n1 = n2
         y = self.model_weights[self.n_convex-2]@y+self.model_weights[self.n_convex-1]@x+ b[n1:]
-        return y
+        
+        if theta is None:
+            compute_b_jax = self.generate_compute_param()
+            def compute_b(theta):
+                return np.array(compute_b_jax(jnp.array(theta)))
+            return y, b, compute_b
+        else:
+            return y, None, None
+        
 
     def tojax(self):
         @jax.jit
