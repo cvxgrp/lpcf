@@ -72,22 +72,25 @@ print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
 # #########################
 # Convexity check in CVXPY
 x_cvx = cp.Variable((nu, 1))
-#theta_cvx = cp.Parameter((npar, 1))
-f_cvx, param_cvx, transform_param = pcf.tocvxpy(x_cvx)
+theta_cvx = cp.Parameter((npar, 1))
+#f_cvx, param_cvx, transform_param = pcf.tocvxpy(x_cvx)
+f_cvx = pcf.tocvxpy(x_cvx, theta_cvx)
 print(f'cvxpy expressions is {"DCP" if f_cvx.is_dcp() else "non-DCP"}')
 print(f'cvxpy expressions is {"DPP" if f_cvx.is_dpp() else "non-DPP"}')
 # #########################
 
 # example evaluation of f_cvx
 x_cvx.value = np.random.rand(nu, 1)
-param_cvx.value = transform_param(np.random.rand(npar, 1))
+#param_cvx.value = transform_param(np.random.rand(npar, 1))
+theta_cvx.value = np.random.rand(npar, 1)
 print(f_cvx.value)
 
 constr = [x_cvx<=2.*np.ones((nu,1)), 
             x_cvx>=-2.*np.ones((nu,1))]
 cvx_prob = cp.Problem(cp.Minimize(f_cvx), constr)
 def solve_cvx_problem(cvx_prob, p):
-    param_cvx.value = transform_param(np.array(p).reshape(npar, 1))
+    #param_cvx.value = transform_param(np.array(p).reshape(npar, 1))
+    theta_cvx.value = np.array(p).reshape(npar, 1)
     cvx_prob.solve(solver=cp.SCS)
     return x_cvx.value
 

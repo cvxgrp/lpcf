@@ -176,10 +176,10 @@ class PCF:
         return {'time': t, 'R2': R2, 'msg': msg}
     
     
-    def generate_compute_param(self) -> Callable:
+    def generate_psi(self) -> Callable:
         
         @jax.jit
-        def b(theta):
+        def psi(theta):
             weights_parameter = self.model_weights[self.n_convex:]
             out = self.act_param_jax(weights_parameter[0] @ theta + weights_parameter[1])
             for j in range(self.L_parameter - 1):
@@ -187,39 +187,34 @@ class PCF:
             out = weights_parameter[-3]@out+weights_parameter[-2]@theta+weights_parameter[-1]
             return out
         
-        return b
+        return psi
+    
+    
+    def _generate_psi_numpy_wrapper(self) -> Callable:
+        
+        psi_jnp = self.generate_psi()
+        def psi(theta):
+            return np.array(psi_jnp(jnp.array(theta)))
+        return psi
         
     
-    def tocvxpy(self, x: cp.Variable, theta: cp.Parameter=None) -> cp.Expression:
+    def tocvxpy(self, x: cp.Variable, theta: cp.Parameter) -> cp.Expression:
         
-        if theta is None:
-            b = cp.Parameter((self.nbias, 1))
-        else:
-            # TODO: catch if activation is non-monotonic
-            # Evaluate bias terms
-            weights_parameter = self.model_weights[self.n_convex:]
-            b = self.act_param_cvxpy(weights_parameter[0]@theta+weights_parameter[1])
-            for j in range(self.L_parameter-1):
-                b = self.act_param_cvxpy(weights_parameter[2+3*j]@b+weights_parameter[3+3*j]@theta+weights_parameter[4+3*j])
-            b = weights_parameter[-3]@b+weights_parameter[-2]@theta+weights_parameter[-1]
+        # TODO: catch if activation is non-monotonic
+        
+        psi = self._generate_psi_numpy_wrapper()
+        omega = cp.CallbackParam(lambda: psi(theta.value), (self.nbias, 1))
 
         # Evaluate convex objective function(s)
         n1 = self.widths_variable[0]
-        y = self.act_var_cvxpy(self.model_weights[0] @ x + b[:n1])            
+        y = self.act_var_cvxpy(self.model_weights[0] @ x + omega[:n1])            
         for j in range(self.L_variable-1):
             n2 = self.widths_variable[j+1] + n1
-            y = self.act_var_cvxpy(self.model_weights[1+2*j] @ y + self.model_weights[2+2*j] @ x + b[n1:n2])
+            y = self.act_var_cvxpy(self.model_weights[1+2*j] @ y + self.model_weights[2+2*j] @ x + omega[n1:n2])
             n1 = n2
-        y = self.model_weights[self.n_convex-2]@y+self.model_weights[self.n_convex-1]@x+ b[n1:]
-        
-        if theta is None:
-            compute_b_jax = self.generate_compute_param()
-            def compute_b(theta):
-                return np.array(compute_b_jax(jnp.array(theta)))
-            return y, b, compute_b
-        else:
-            return y, None, None
-        
+        y = self.model_weights[self.n_convex-2]@y+self.model_weights[self.n_convex-1]@x+ omega[n1:]
+        return y
+
 
     def tojax(self):
         @jax.jit
