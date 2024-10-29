@@ -112,10 +112,10 @@ class PCF:
         """Initialize variable and parameter networks."""
         
         @jax.jit
-        def _psi_fcn(theta, weights_psi):
-            W_psi = weights_psi[:self.L_psi-1]
-            V_psi = weights_psi[self.L_psi-1:2*self.L_psi-1]
-            b_psi = weights_psi[2*self.L_psi-1:]
+        def _psi_fcn(theta, weights):
+            W_psi = weights[self.indices.W_psi:self.indices.V_psi]
+            V_psi = weights[self.indices.V_psi:self.indices.b_psi]
+            b_psi = weights[self.indices.b_psi:]
             omega = self.act_psi_jax(V_psi[0] @ theta.T + b_psi[0])
             for j in range(1, self.L_psi - 1):
                 jW = j - 1 # because W_psi1 does not exist
@@ -129,7 +129,7 @@ class PCF:
             theta = xtheta[:, self.n:]
             W = weights[:self.indices.V]
             V = weights[self.indices.V:self.indices.W_psi]
-            omega = _psi_fcn(theta, weights[self.indices.W_psi:])
+            omega = _psi_fcn(theta, weights)
             i1 = self.widths[1]
             y = self.act_jax(V[0] @ x.T + omega[:, :i1].T)            
             for j in range(1, self.L - 1):
