@@ -157,7 +157,7 @@ class PCF:
             Theta = Theta.reshape(-1, 1)
         
         if not isinstance(seeds, np.ndarray):
-            seeds=np.array(seeds)
+            seeds=np.atleast_1d(seeds)
                 
         N, self.d = Y.shape
         self.n = X.shape[1]
@@ -255,7 +255,7 @@ class PCF:
 
     def tojax(self):
         @jax.jit
-        def fcn_jax(x, theta, params):
+        def fcn_jax(x, theta, params): # why do we need to pass params here?
             if x.ndim == 1:
                 # single input
                 x = x.reshape(-1, 1)
