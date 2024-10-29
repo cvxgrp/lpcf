@@ -168,12 +168,15 @@ class PCF:
         else:
             self.widths = [self.n] + self.widths + [self.d]
         
+        self.L = len(self.widths[1:])
         self.m = sum(self.widths[1:])
         
         if self.widths_psi is None:
             self.widths_psi = [self.p, self.m, self.m]
         else:
             self.widths_psi = [self.p] + self.widths_psi + [self.m]
+            
+        self.L_psi = len(self.widths_psi[1:])
 
         self._setup_model(seeds[0])
         
