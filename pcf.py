@@ -131,7 +131,7 @@ class PCF:
             V = weights[self.indices.V:self.indices.W_psi]
             omega = _psi_fcn(theta, weights)
             i1 = self.widths[1]
-            y = self.act_jax(V[0] @ x.T + omega[:, :i1].T)            
+            y = self.act_jax(V[0] @ x.T + omega[:, :i1].T)
             for j in range(1, self.L - 1):
                 i2 = self.widths[j + 1] + i1
                 jW = j - 1 # because W1 does not exist
@@ -183,7 +183,7 @@ class PCF:
         )
 
         @jax.jit
-        def output_loss(Yhat, Y): 
+        def output_loss(Yhat, Y):
             return jnp.sum((Yhat[:, :self.d] - Y[:, :self.d])**2) / Y.shape[0]
 
         # TODO: cross-validate over tau_th
@@ -198,7 +198,7 @@ class PCF:
             self.model.params = models[ibest].params
         else:
             self.model.fit(Y, XTheta)
-        t = time.time()-t
+        t = time.time() - t
 
         Yhat = self.model.predict(XTheta)
         R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
