@@ -59,7 +59,7 @@ def oracle(U,P):
    
 nx = nu+npar  # number of inputs
 
-pcf = PCF(widths_variable=[10,10], widths_parameter=[5,5], activation_variable='logistic', activation_parameter='swish')
+pcf = PCF(widths=[10,10], widths_psi=[5,5], activation='logistic', activation_psi='swish')
 stats = pcf.fit(Y, U, P, tau_th=tau_th, zero_coeff=zero_coeff, seeds=seeds, cores=cores, adam_epochs=100, lbfgs_epochs=100)
 
 f_jax, weights = pcf.tojax() # get the jax function and parameters: y = f_jax(x,theta,params)

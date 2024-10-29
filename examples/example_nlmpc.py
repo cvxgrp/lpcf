@@ -117,7 +117,7 @@ Y, ymean, ygain = standard_scale(Y.reshape(-1,1))
 P = np.hstack((X0,R,UOLD, INT))
 npar = P.shape[1] # number of states + output references + previous input
 
-pcf = PCF(widths_variable=widths_variable, widths_parameter=widths_parameter, activation_variable='logistic', activation_parameter='swish')
+pcf = PCF(widths=widths_variable, widths_psi=widths_parameter, activation='logistic', activation_psi='swish')
 stats = pcf.fit(Y, U, P, rho_th=rho_th, tau_th=tau_th, zero_coeff=zero_coeff, cores=cores, seeds=seeds, adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
 
 f_jax, weights = pcf.tojax() # get the jax function and parameters: y = f_jax(x,theta,params)
