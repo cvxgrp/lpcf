@@ -28,13 +28,20 @@ ACTIVATIONS = {
     'swish':        {'jax': lambda x: jax.nn.swish(x),      'cvxpy': lambda x: x/(1. + cp.exp(cp.minimum(-x, 100.))),   'convex_increasing': False},
 }
 
+
 @dataclass
 class Indices:
-    W : int = 0
-    V : int = 0
     W_psi : int = 0
     V_psi : int = 0
     b_psi : int = 0
+
+
+@dataclass
+class Section:
+    start : int = 0
+    end : int = 0
+    shape : tuple = (0, 0)
+
 
 class PCF:
     
@@ -47,8 +54,8 @@ class PCF:
         self.L = len(widths) + 1 if widths else None
         self.L_psi = len(widths_psi) + 1 if widths_psi else None
         
-        self.num_W_V = None
-        self.d, self.n, self.p = None, None, None
+        self.d, self.n, self.p, self.m = None, None, None, None
+        self.section_W, self.section_V, self.section_omega = None, None, None
         
         if not ACTIVATIONS[activation]['convex_increasing']:
             raise ValueError('Activation function for variable network must be convex and increasing.')
@@ -63,6 +70,7 @@ class PCF:
         
         self.model = None
         self.weights = None
+        self.weights_psi = None
         self.indices = None
         
         
@@ -74,70 +82,63 @@ class PCF:
         
         np.random.seed(seed)
         
-        self.num_W_V = 2 * self.L - 1
-        
-        W = []
-        V = []
-        for l in range(2, self.L + 1): # W1 does not exist
-            W.append(np.random.rand(self.widths[l], self.widths[l - 1]))
-        for l in range(1, self.L + 1):
-            V.append(np.random.rand(self.widths[l], self.n))
-
         W_psi = []
         V_psi = []
         b_psi = []
         for l in range(2, self.L_psi + 1): # W_psi1 does not exist
-            W_psi.append(np.random.randn(self.widths_psi[l], self.widths_psi[l - 1]))
+            W_psi.append(self._rand(self.widths_psi[l], self.widths_psi[l - 1]))
         for l in range(1, self.L_psi + 1):
-            V_psi.append(np.random.randn(self.widths_psi[l], self.p))
-            b_psi.append(np.random.randn(self.widths_psi[l], 1))
+            V_psi.append(self._rand(self.widths_psi[l], self.p))
+            b_psi.append(self._rand(self.widths_psi[l], 1))
         
         indices = [0]
-        for list_ in [W, V, W_psi, V_psi]:
+        for list_ in [W_psi, V_psi]:
             indices.append(indices[-1] + len(list_))
         self.indices = Indices(*indices)
         
-        self.weights = W + V + W_psi + V_psi + b_psi
+        self.weights_psi = W_psi + V_psi + b_psi
         
-        return self.weights
-
-
-    def _init_lower_bounds(self):
-        min_W = [np.zeros(w.shape) for w in self.weights[:self.indices.V]]
-        min_other = [-np.inf*np.ones(w.shape) for w in self.weights[self.indices.V:]]
-        return min_W + min_other
+        return self.weights_psi
+    
+    
+    def _rand(self, first_dim, second_dim):
+        return np.random.rand(first_dim, second_dim) - 0.5
 
 
     def _setup_model(self, seed=0):
         """Initialize variable and parameter networks."""
         
         @jax.jit
-        def _psi_fcn(theta, weights):
-            W_psi = weights[self.indices.W_psi:self.indices.V_psi]
-            V_psi = weights[self.indices.V_psi:self.indices.b_psi]
-            b_psi = weights[self.indices.b_psi:]
-            omega = self.act_psi_jax(V_psi[0] @ theta.T + b_psi[0])
+        def _psi_fcn(theta, weights_psi):
+            W_psi = weights_psi[self.indices.W_psi:self.indices.V_psi]
+            V_psi = weights_psi[self.indices.V_psi:self.indices.b_psi]
+            b_psi = weights_psi[self.indices.b_psi:]
+            out = self.act_psi_jax(V_psi[0] @ theta.T + b_psi[0])
             for j in range(1, self.L_psi - 1):
                 jW = j - 1 # because W_psi1 does not exist
-                omega = self.act_psi_jax(W_psi[jW] @ omega + V_psi[j] @ theta.T + b_psi[j])
-            omega = W_psi[-1] @ omega + V_psi[-1] @ theta.T + b_psi[-1]
-            return omega.T
+                out = self.act_psi_jax(W_psi[jW] @ out + V_psi[j] @ theta.T + b_psi[j])
+            out = W_psi[-1] @ out + V_psi[-1] @ theta.T + b_psi[-1]
+            start, end = self.section_W[0].start, self.section_W[-1].end
+            out = out.at[start:end].set(jnp.maximum(out[start:end], 0))
+            return out.T
         
         @jax.jit
-        def _fcn(xtheta, weights):
+        def _fcn(xtheta, weights_psi):
             x = xtheta[:, :self.n]
             theta = xtheta[:, self.n:]
-            W = weights[:self.indices.V]
-            V = weights[self.indices.V:self.indices.W_psi]
-            omega = _psi_fcn(theta, weights)
-            i1 = self.widths[1]
-            y = self.act_jax(V[0] @ x.T + omega[:, :i1].T)
+            WVomega_flat = _psi_fcn(theta, weights_psi)
+            W, V, omega = [], [], []
+            for s in self.section_W:
+                W.append(WVomega_flat[:, s.start:s.end].reshape((-1, *s.shape)))
+            for s in self.section_V:
+                V.append(WVomega_flat[:, s.start:s.end].reshape((-1, *s.shape)))
+            for s in self.section_omega:
+                omega.append(WVomega_flat[:, s.start:s.end].reshape((-1, *s.shape)))
+            y = self.act_jax(jax.vmap(jnp.matmul)(V[0], x).T + jnp.squeeze(omega[0].T))
             for j in range(1, self.L - 1):
-                i2 = self.widths[j + 1] + i1
                 jW = j - 1 # because W1 does not exist
-                y = self.act_jax(W[jW] @ y + V[j] @ x.T + omega[:, i1:i2].T)
-                i1 = i2
-            y = W[-1] @ y + V[-1] @ x.T + omega[:, i1:].T
+                y = self.act_jax(jax.vmap(jnp.matmul)(W[jW], y.T).T + jax.vmap(jnp.matmul)(V[j], x).T + jnp.squeeze(omega[j].T))
+            y = jax.vmap(jnp.matmul)(W[-1], y.T).T + jax.vmap(jnp.matmul)(V[-1], x).T + jnp.squeeze(omega[-1].T)
             return y.T
         
         self.model = StaticModel(self.d, self.n + self.p, _fcn)
@@ -169,7 +170,26 @@ class PCF:
             self.widths = [self.n] + self.widths + [self.d]
         
         self.L = len(self.widths[1:])
-        self.m = sum(self.widths[1:])
+
+        self.section_W = []
+        self.section_V = []
+        self.section_omega = []
+        offset = 0
+        for l in range(2, self.L + 1): # W_psi1 does not exist
+            shape = (self.widths[l], self.widths[l - 1])
+            size = np.prod(shape)
+            self.section_W.append(Section(offset, offset + size, shape))
+            offset += size
+        for l in range(1, self.L + 1):
+            shape = (self.widths[l], self.n)
+            size = np.prod(shape)
+            self.section_V.append(Section(offset, offset + size, shape))
+            offset += size
+        for l in range(1, self.L + 1):
+            size = self.widths[l]
+            self.section_omega.append(Section(offset, offset + size, (size, 1)))
+            offset += size
+        self.m = offset
         
         if self.widths_psi is None:
             self.widths_psi = [self.p, self.m, self.m]
@@ -180,14 +200,11 @@ class PCF:
 
         self._setup_model(seeds[0])
         
-        self.model.optimization(
-            adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs,
-            params_min=self._init_lower_bounds(), params_max=None
-        )
+        self.model.optimization(adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
 
         @jax.jit
         def output_loss(Yhat, Y):
-            return jnp.sum((Yhat[:, :self.d] - Y[:, :self.d])**2) / Y.shape[0]
+            return jnp.sum((Yhat - Y)**2) / Y.shape[0]
 
         # TODO: cross-validate over tau_th
         self.model.loss(rho_th=rho_th, tau_th=tau_th, output_loss=output_loss, zero_coeff=zero_coeff)
@@ -206,7 +223,7 @@ class PCF:
         Yhat = self.model.predict(XTheta)
         R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
 
-        self.weights = self.model.params
+        self.weights_psi = self.model.params
         return {'time': t, 'R2': R2, 'msg': msg}
     
     
@@ -214,9 +231,9 @@ class PCF:
         
         @jax.jit
         def psi(theta):
-            W_psi = self.weights[self.indices.W_psi:self.indices.V_psi]
-            V_psi = self.weights[self.indices.V_psi:self.indices.b_psi]
-            b_psi = self.weights[self.indices.b_psi:]
+            W_psi = self.weights_psi[self.indices.W_psi:self.indices.V_psi]
+            V_psi = self.weights_psi[self.indices.V_psi:self.indices.b_psi]
+            b_psi = self.weights_psi[self.indices.b_psi:]
             
             out = self.act_psi_jax(V_psi[0] @ theta + b_psi[0])
             for j in range(1, self.L_psi - 1):
@@ -239,20 +256,21 @@ class PCF:
     def tocvxpy(self, x: cp.Variable, theta: cp.Parameter) -> cp.Expression:
                 
         psi = self._generate_psi_numpy_wrapper()
-        omega = cp.CallbackParam(lambda: psi(theta.value), (self.m, 1))
-
-        W = self.weights[:self.indices.V]
-        V = self.weights[self.indices.V:self.indices.W_psi]
+        WVomega_flat = cp.CallbackParam(lambda: psi(theta.value), (self.m, 1))
+        W, V, omega = [], [], []
+        for s in self.section_W:
+            W.append(WVomega_flat[s.start:s.end].reshape(s.shape))
+        for s in self.section_V:
+            V.append(WVomega_flat[s.start:s.end].reshape(s.shape))
+        for s in self.section_omega:
+            omega.append(WVomega_flat[s.start:s.end].reshape(s.shape))
 
         # Evaluate convex objective function(s)
-        n1 = self.widths[1]
-        y = self.act_cvxpy(V[0] @ x + omega[:n1]) 
+        y = self.act_cvxpy(V[0] @ x + omega[0]) 
         for j in range(1, self.L - 1):
-            n2 = self.widths[j + 1] + n1
             jW = j - 1 # because W1 does not exist
-            y = self.act_cvxpy(W[jW] @ y + V[j] @ x + omega[n1:n2])
-            n1 = n2
-        y = W[-1] @ y + V[-1] @ x + omega[n1:]
+            y = self.act_cvxpy(W[jW] @ y + V[j] @ x + omega[j])
+        y = W[-1] @ y + V[-1] @ x + omega[-1]
         return y
 
 

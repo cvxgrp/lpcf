@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from itertools import product
 from pcf import PCF
 
-seed = 3
+seed = 0
 np.random.seed(seed)
 
 # data generating (true) function
@@ -31,12 +31,11 @@ v_      = -1 + 2 * np.random.rand(n_rand)
 IN = np.array(list(product(x_, splus_, sminus_, m_, v_)))
 X, Theta = IN[:, 0], IN[:, 1:]
 Y = f_true(X, Theta.T)
-X = X.reshape(-1, 1)
 
 # fit
 
-pcf = PCF(widths=[1, 2], widths_psi=[10, 10], activation='relu')
-stats = pcf.fit(Y, X, Theta, tau_th=0., seeds=np.arange(10), cores=10, adam_epochs=200, lbfgs_epochs=2000)
+pcf = PCF(widths=[5, 5], widths_psi=None, activation='relu')
+stats = pcf.fit(Y, X, Theta, tau_th=0., seeds=np.arange(10), cores=10)
 
 print(f"Elapsed time: {stats['time']} s")
 print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
