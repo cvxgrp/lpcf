@@ -1,4 +1,5 @@
 
+import pickle
 import numpy as np
 import cvxpy as cp
 import matplotlib.pyplot as plt
@@ -69,6 +70,10 @@ for _ in range(6):
     y_true_.append(f_true(x_, theta))
     y_.append(f(x_, np.tile(theta, (len(x_), 1)), weights))
     theta_.append(theta)
+    
+# pickle x_, y_true_, y_, theta_
+with open('example_pwa.pkl', 'wb') as f:
+    pickle.dump([x_, y_true_, y_, theta_], f)
 
 # plot
 

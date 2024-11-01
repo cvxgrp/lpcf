@@ -1,5 +1,4 @@
 
-import pickle
 import numpy as np
 import cvxpy as cp
 import matplotlib.pyplot as plt
@@ -47,8 +46,8 @@ for i in range(N):
     
 # fit
 
-pcf = PCF(widths=[2, 2], widths_psi=[10, 10], activation='logistic')
-stats = pcf.fit(Y, X, Theta, rho_th=1.e-8, tau_th=0., seeds=np.arange(10), cores=10, adam_epochs=200, lbfgs_epochs=2000)
+pcf = PCF(widths=[5, 5], widths_psi=None, activation='logistic')
+stats = pcf.fit(Y, X, Theta, seeds=np.arange(10), cores=10)
 
 print(f"Elapsed time: {stats['time']} s")
 print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
@@ -65,6 +64,11 @@ K                   = 100
 X1_test             = np.linspace(-1, 1, K)
 X2_test             = np.linspace(-1, 1, K)
 X1_grid, X2_grid    = np.meshgrid(X1_test, X2_test)
+
+#M1 = np.random.rand(n, n) * np.tri(n)
+#M1 = M1 @ M1.T
+#M2 = np.random.rand(n, n) * np.tri(n)
+#M2 = M2 @ M2.T
 
 M1 = np.array([[1, 0.5], [0.5, 0.5]])
 M2 = np.array([[0.1, 0.], [0., 0.2]])
@@ -87,10 +91,6 @@ for a in a_:
             y[i, j] = f(x.reshape(1, n), M.flatten().reshape(1, n**2), weights)[0, 0]
     y_true_.append(y_true)
     y_.append(y)
-    
-# pickle X1_grid, X2_grid, y_true_, y_, a_
-with open('example_quadratic.pkl', 'wb') as f:
-    pickle.dump([X1_grid, X2_grid, y_true_, y_, a_], f)
 
 # plot
 
@@ -105,7 +105,7 @@ for i, ax in enumerate(axes.flat):
     ax.plot_surface(X1_grid, X2_grid, y_[i], color='orange', alpha=0.4, label='y')
     
     mse = np.mean((y_true_[i] - y_[i])**2)
-    ax.set_title(f'a = {np.round(a_[i], 2)}, MSE = {np.round(mse, 5)}')
+    ax.set_title(f'a = {np.round(a_[i], 2)}, MSE = {np.round(mse, 2)}')
     
     ax.set_zlim(0, 2.5)
     
