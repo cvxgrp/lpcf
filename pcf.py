@@ -47,8 +47,8 @@ ACTIVATIONS = {
 }
 
 MAKE_POSITIVE = {
-    'jax': lambda W: W**2,  # jnp.maximum(W, 0.),
-    'cvxpy': lambda W: W**2,  # cp.maximum(W, 0.),
+    'jax': lambda W: jnp.maximum(W, 0.), #W**2,
+    'cvxpy': lambda W: cp.maximum(W, 0.), #W**2,
 }
 
 
