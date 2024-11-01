@@ -20,23 +20,35 @@ def f_true(x, theta):
 
 
 # generate data
+if 0:
+    n_rand  = 10
+    x_      = -1 + 2 * np.random.rand(n_rand)
+    splus_  = -1 + 2 * np.random.rand(n_rand)
+    sminus_ = -1 + 2 * np.random.rand(n_rand)
+    m_      = -1 + 2 * np.random.rand(n_rand)
+    v_      = -1 + 2 * np.random.rand(n_rand)
 
-n_rand  = 10
-x_      = -1 + 2 * np.random.rand(n_rand)
-splus_  = -1 + 2 * np.random.rand(n_rand)
-sminus_ = -1 + 2 * np.random.rand(n_rand)
-m_      = -1 + 2 * np.random.rand(n_rand)
-v_      = -1 + 2 * np.random.rand(n_rand)
+    IN = np.array(list(product(x_, splus_, sminus_, m_, v_)))
+    X, Theta = IN[:, 0], IN[:, 1:]
+    Y = f_true(X, Theta.T)
+    X = X.reshape(-1, 1)
 
-IN = np.array(list(product(x_, splus_, sminus_, m_, v_)))
-X, Theta = IN[:, 0], IN[:, 1:]
-Y = f_true(X, Theta.T)
-X = X.reshape(-1, 1)
+else:
+
+    Nx = 50 # number of x-data per parameter value
+    Nth = 2000 # number of th-data
+    x_      = np.linspace(-1.,1.,Nx)
+    theta_  = -1. + 2. * np.random.rand(Nth,4)
+    XTH = list(product(x_, theta_))
+    X = np.array([XTH[i][0] for i in range(len(XTH))]).reshape(-1,1)
+    Theta = np.array([XTH[i][1] for i in range(len(XTH))])
+    Y = np.array([f_true(X[i],Theta[i]) for i in range(X.shape[0])])
+
 
 # fit
 
 pcf = PCF(widths=[1, 2], widths_psi=[10, 10], activation='relu')
-stats = pcf.fit(Y, X, Theta, tau_th=0., seeds=np.arange(10), cores=10, adam_epochs=200, lbfgs_epochs=2000)
+stats = pcf.fit(Y, X, Theta, rho_th=1.e-8, tau_th=0., seeds=np.arange(10), cores=10, adam_epochs=200, lbfgs_epochs=2000)
 
 print(f"Elapsed time: {stats['time']} s")
 print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
@@ -74,3 +86,7 @@ plt.tight_layout()
 plt.show()
 
 print('done')
+
+x = cp.Variable((1, 1))
+theta = cp.Parameter((4, 1))
+cvxpy_model = pcf.tocvxpy(x=x, theta=theta)

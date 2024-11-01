@@ -28,7 +28,6 @@ ACTIVATIONS = {
     'swish':        {'jax': lambda x: jax.nn.swish(x),      'cvxpy': lambda x: x/(1. + cp.exp(cp.minimum(-x, 100.))),   'convex_increasing': False},
 }
 
-
 @dataclass
 class Indices:
     W_psi : int = 0
@@ -77,7 +76,6 @@ class PCF:
     def _get_act(self, activation, interface):
         return ACTIVATIONS[activation.lower()][interface]
         
-        
     def _init_weights(self, seed=0):
         
         np.random.seed(seed)
@@ -118,10 +116,18 @@ class PCF:
                 jW = j - 1 # because W_psi1 does not exist
                 out = self.act_psi_jax(W_psi[jW] @ out + V_psi[j] @ theta.T + b_psi[j])
             out = W_psi[-1] @ out + V_psi[-1] @ theta.T + b_psi[-1]
-            start, end = self.section_W[0].start, self.section_W[-1].end
-            out = out.at[start:end].set(jnp.maximum(out[start:end], 0))
+            # Here matrices W_1,...,W_{L-1} are unsigned. 
+
+            #start, end = self.section_W[0].start, self.section_W[-1].end
+            #out = out.at[start:end].set(jnp.maximum(out[start:end], 0))
+            #out = out.at[start:end].set(out[start:end]**2)
             return out.T
-        
+
+        @jax.jit
+        def _make_positive(W): # Note: this must be consistent with _make_positive_cvxpy
+            return W**2
+            #return jnp.maximum(W, 0.)
+
         @jax.jit
         def _fcn(xtheta, weights_psi):
             x = xtheta[:, :self.n]
@@ -137,15 +143,15 @@ class PCF:
             y = self.act_jax(jax.vmap(jnp.matmul)(V[0], x).T + jnp.squeeze(omega[0].T))
             for j in range(1, self.L - 1):
                 jW = j - 1 # because W1 does not exist
-                y = self.act_jax(jax.vmap(jnp.matmul)(W[jW], y.T).T + jax.vmap(jnp.matmul)(V[j], x).T + jnp.squeeze(omega[j].T))
-            y = jax.vmap(jnp.matmul)(W[-1], y.T).T + jax.vmap(jnp.matmul)(V[-1], x).T + jnp.squeeze(omega[-1].T)
+                y = self.act_jax(jax.vmap(jnp.matmul)(_make_positive(W[jW]), y.T).T + jax.vmap(jnp.matmul)(V[j], x).T + jnp.squeeze(omega[j].T))
+            y = jax.vmap(jnp.matmul)(_make_positive(W[-1]), y.T).T + jax.vmap(jnp.matmul)(V[-1], x).T + jnp.squeeze(omega[-1].T)
             return y.T
         
         self.model = StaticModel(self.d, self.n + self.p, _fcn)
         self.model.init(params=self._init_weights(seed))
 
 
-    def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=1.e-3, zero_coeff=1.e-4, seeds=0, cores=1, adam_epochs=1000, lbfgs_epochs=1000):
+    def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=0., zero_coeff=1.e-4, seeds=0, cores=1, adam_epochs=1000, lbfgs_epochs=1000):
         
         if Y.ndim == 1:
             # single output
@@ -244,7 +250,6 @@ class PCF:
         
         return psi
     
-    
     def _generate_psi_numpy_wrapper(self) -> Callable:
         
         psi_jnp = self.generate_psi()
@@ -254,12 +259,16 @@ class PCF:
         
     
     def tocvxpy(self, x: cp.Variable, theta: cp.Parameter) -> cp.Expression:
+
+        def _make_positive_cvxpy(W): # Note: this must be consistent with _make_positive
+            return W**2
+            #return cp.maximum(W, 0.)
                 
         psi = self._generate_psi_numpy_wrapper()
         WVomega_flat = cp.CallbackParam(lambda: psi(theta.value), (self.m, 1))
         W, V, omega = [], [], []
         for s in self.section_W:
-            W.append(WVomega_flat[s.start:s.end].reshape(s.shape))
+            W.append(_make_positive_cvxpy(WVomega_flat[s.start:s.end].reshape(s.shape))) # enforce W weights to be nonnegative
         for s in self.section_V:
             V.append(WVomega_flat[s.start:s.end].reshape(s.shape))
         for s in self.section_omega:
