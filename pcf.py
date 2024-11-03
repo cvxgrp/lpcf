@@ -167,7 +167,8 @@ class PCF:
         self.model.init(params=self._init_weights(seed))
 
     def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=0., zero_coeff=1.e-4,
-            seeds=0, cores=1, adam_epochs=1000, lbfgs_epochs=1000) -> Dict[str, float]:
+            seeds=0, cores=1, adam_epochs=1000, lbfgs_epochs=1000,
+            tune=False, n_folds=5) -> Dict[str, float]:
         
         if Y.ndim == 1:
             # single output
@@ -224,26 +225,47 @@ class PCF:
         @jax.jit
         def output_loss(Yhat, Y):
             return jnp.sum((Yhat - Y)**2) / Y.shape[0]
-
-        # TODO: cross-validate over tau_th
-        self.model.loss(rho_th=rho_th, tau_th=tau_th, output_loss=output_loss, zero_coeff=zero_coeff)
-
-        t = time.time()
+        
         XTheta = np.hstack((X.reshape(self.N, self.n), Theta.reshape(self.N, self.p)))
-        if cores > 1:
-            models = self.model.parallel_fit(Y, XTheta, self._init_weights, seeds=seeds, n_jobs=cores)
-            R2s = [np.sum(compute_scores(Y, m.predict(XTheta.reshape(-1, self.n + self.p)), None, None, fit='R2')[0]) for m in models]
-            ibest = np.argmax(R2s)
-            self.model.params = models[ibest].params
-        else:
-            self.model.fit(Y, XTheta)
+        
+        t = time.time()
+        if tune:
+            tau_th_init = 1e-3 if tau_th == 0. else tau_th
+            tau_th_candidates = [0.] + list(np.logspace(-2, 2, 5) * tau_th_init)
+            f = int(np.ceil(self.N / n_folds))
+            cv_scores = np.zeros_like(tau_th_candidates)
+            for i, tau_th_candidate in enumerate(tau_th_candidates):
+                self.model.loss(rho_th=rho_th, tau_th=tau_th_candidate, output_loss=output_loss, zero_coeff=zero_coeff)
+                score = 0.
+                for j in range(n_folds):
+                    Y_train, XTheta_train = np.vstack((Y[:j*f], Y[(j+1)*f:])), np.vstack((XTheta[:j*f], XTheta[(j+1)*f:]))
+                    Y_val, XTheta_val = Y[j*f:(j+1)*f], XTheta[j*f:(j+1)*f]
+                    self._fit_data(Y_train, XTheta_train, seeds, cores)
+                    score += self._compute_r2(Y_val, self.model.predict(XTheta_val.reshape(-1, self.n + self.p)))
+                cv_scores[i] = score
+            tau_th = tau_th_candidates[np.argmax(cv_scores)]
+        self.model.loss(rho_th=rho_th, tau_th=tau_th, output_loss=output_loss, zero_coeff=zero_coeff)
+        self._fit_data(Y, XTheta, seeds, cores)
         t = time.time() - t
 
         Yhat = self.model.predict(XTheta)
         R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
 
         self.weights = self.model.params
-        return {'time': t, 'R2': R2, 'msg': msg}
+        return {'time': t, 'R2': R2, 'msg': msg, 'lambda': tau_th}
+    
+    def _fit_data(self, Y, XTheta, seeds, cores) -> None:
+        if cores > 1:
+            models = self.model.parallel_fit(Y, XTheta, self._init_weights, seeds=seeds, n_jobs=cores)
+            R2s = [self._compute_r2(Y, m.predict(XTheta.reshape(-1, self.n + self.p))) for m in models]
+            ibest = np.argmax(R2s)
+            self.model.params = models[ibest].params
+        else:
+            self.model.fit(Y, XTheta)
+    
+    def _compute_r2(self, Y, Yhat) -> float:
+        r2, _, _ = compute_scores(Y, Yhat, None, None, fit='R2')
+        return r2
     
     def _generate_psi_flat(self) -> Callable:
         
