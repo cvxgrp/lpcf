@@ -66,31 +66,28 @@ X1_test             = np.linspace(-1, 1, K)
 X2_test             = np.linspace(-1, 1, K)
 X1_grid, X2_grid    = np.meshgrid(X1_test, X2_test)
 
-M1 = np.array([[1, 0.5], [0.5, 0.5]])
-M2 = np.array([[0.1, 0.], [0., 0.2]])
-
-print(M1)
-print(M2)
-
-a_ = np.linspace(0, 1, 6)
+factors = [np.random.rand(n, n) * np.tri(n) for _ in range(2)]
+summands = [np.random.rand(n, n) for _ in range(1)]
+for i in range(len(summands)):
+    summands[i] -= 0.5 * np.diag(np.diag(summands[i]))
+theta_ = [factor @ factor.T for factor in factors] + [summand + summand.T for summand in summands]
 
 y_true_ = []
 y_ = []
-for a in a_:
-    M = a * M1 + (1 - a) * M2
+for th in theta_:
     y_true = np.zeros((K, K))
     y = np.zeros((K, K))
     for i, x1 in enumerate(X1_test):
         for j, x2 in enumerate(X2_test):
             x = np.array([x1, x2])
-            y_true[i, j] = f_true(x, M.flatten())
-            y[i, j] = f(x.reshape(1, n), M.flatten().reshape(1, n**2), weights)[0, 0]
+            y_true[i, j] = f_true(x, th.flatten())
+            y[i, j] = f(x.reshape(1, n), th.flatten().reshape(1, n**2), weights)[0, 0]
     y_true_.append(y_true)
     y_.append(y)
     
 # pickle X1_grid, X2_grid, y_true_, y_, a_
 with open('example_quadratic.pkl', 'wb') as f:
-    pickle.dump([X1_grid, X2_grid, y_true_, y_, a_], f)
+    pickle.dump([X1_grid, X2_grid, y_true_, y_, theta_], f)
 
 # plot
 
@@ -105,7 +102,7 @@ for i, ax in enumerate(axes.flat):
     ax.plot_surface(X1_grid, X2_grid, y_[i], color='orange', alpha=0.4, label='y')
     
     mse = np.mean((y_true_[i] - y_[i])**2)
-    ax.set_title(f'a = {np.round(a_[i], 2)}, MSE = {np.round(mse, 5)}')
+    ax.set_title(r'$\theta^' + str(i + 1) + r'$')
     
     ax.set_zlim(0, 2.5)
     
