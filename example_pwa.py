@@ -48,11 +48,12 @@ else:
 
 # fit
 
-pcf = PCF(widths=[1, 2], widths_psi=[10, 10], activation='relu')
-stats = pcf.fit(Y, X, Theta, rho_th=1.e-8, tau_th=0., seeds=np.arange(10), cores=10, adam_epochs=200, lbfgs_epochs=2000)
+pcf = PCF()
+stats = pcf.fit(Y, X, Theta, seeds=np.arange(10), cores=10)
 
 print(f"Elapsed time: {stats['time']} s")
 print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
+print(f"lambda value: {stats['lambda']}")
 
 # export to jax
 

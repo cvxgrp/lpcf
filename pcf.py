@@ -167,7 +167,7 @@ class PCF:
         self.model.init(params=self._init_weights(seed))
 
     def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=0., zero_coeff=1.e-4,
-            seeds=0, cores=1, adam_epochs=1000, lbfgs_epochs=1000,
+            seeds=0, cores=1, adam_epochs=200, lbfgs_epochs=2000,
             tune=False, n_folds=5) -> Dict[str, float]:
         
         if Y.ndim == 1:
@@ -188,7 +188,8 @@ class PCF:
         self.p = Theta.shape[1]
         
         if self.widths is None:
-            self.widths = [self.n, self.d, self.d]
+            width_inner = 2 * ((self.n + self.d) // 2)
+            self.widths = [self.n, width_inner, width_inner, self.d]
         else:
             self.widths = [self.n] + self.widths + [self.d]
         self.L = len(self.widths[1:])
@@ -214,7 +215,8 @@ class PCF:
         self.m = offset
         
         if self.widths_psi is None:
-            self.widths_psi = [self.p, self.m, self.m]
+            width_inner = (self.p + self.m) // 2
+            self.widths_psi = [self.p, width_inner, width_inner, self.m]
         else:
             self.widths_psi = [self.p] + self.widths_psi + [self.m]
         self.L_psi = len(self.widths_psi[1:])

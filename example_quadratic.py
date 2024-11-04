@@ -47,8 +47,8 @@ for i in range(N):
     
 # fit
 
-pcf = PCF(widths=[2, 2], widths_psi=[10, 10], activation='logistic')
-stats = pcf.fit(Y, X, Theta, rho_th=1.e-8, tau_th=0., seeds=np.arange(10), cores=10, adam_epochs=200, lbfgs_epochs=2000)
+pcf = PCF(activation='logistic')
+stats = pcf.fit(Y, X, Theta, seeds=np.arange(10), cores=10)
 
 print(f"Elapsed time: {stats['time']} s")
 print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
@@ -94,7 +94,7 @@ with open('example_quadratic.pkl', 'wb') as f:
 
 # plot
 
-fig, axes = plt.subplots(2, 3, subplot_kw={'projection': '3d'}, figsize=(15, 8))
+fig, axes = plt.subplots(1, 3, subplot_kw={'projection': '3d'}, figsize=(15, 8))
 
 for i, ax in enumerate(axes.flat):
     
