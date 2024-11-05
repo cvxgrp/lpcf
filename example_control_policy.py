@@ -33,7 +33,7 @@ R=R.T@R # unknown weight on inputs
 
 N1=100 # length of experiment to compute performance index
 N2=1 # number of steps the performance index is evaluated along the state trajectory
-N3=200 # number of experiments with different policies
+N3=2000 # number of experiments with different policies
 
 A = np.array([[.5,.3,0],[.3,-.5,.2],[.5,-.4,0]]) # unknown linear system matrix
 B = np.array([[.3],[-.4],[.5]]) # unknown linear system matrix
