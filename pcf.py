@@ -167,7 +167,7 @@ class PCF:
         self.model.init(params=self._init_weights(seed))
 
     def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=0., zero_coeff=1.e-4,
-            seeds=0, cores=1, adam_epochs=200, lbfgs_epochs=2000,
+            seeds=None, cores=4, adam_epochs=200, lbfgs_epochs=2000,
             tune=False, n_folds=5) -> Dict[str, float]:
         
         if Y.ndim == 1:
@@ -179,7 +179,9 @@ class PCF:
         if Theta.ndim == 1:
             # single parameter
             Theta = Theta.reshape(-1, 1)
-        
+            
+        if seeds is None:
+            seeds = np.arange(max(10, cores))
         if not isinstance(seeds, np.ndarray):
             seeds = np.atleast_1d(seeds)
         

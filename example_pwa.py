@@ -49,7 +49,7 @@ else:
 # fit
 
 pcf = PCF()
-stats = pcf.fit(Y, X, Theta, seeds=np.arange(10), cores=10)
+stats = pcf.fit(Y, X, Theta, cores=10)
 
 print(f"Elapsed time: {stats['time']} s")
 print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
