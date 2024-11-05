@@ -319,13 +319,9 @@ class PCF:
 
     def tojax(self) -> Tuple[Callable, List[np.ndarray]]:
         @jax.jit
-        def fcn_jax(x, theta, params):  # why do we need to pass params here?
-            if x.ndim == 1:
-                # single input
-                x = x.reshape(-1, 1)
-            if theta.ndim == 1:
-                # single parameter
-                theta = theta.reshape(-1, 1)
+        def fcn_jax(x, theta):
+            x = x.reshape(-1, self.n)
+            theta = theta.reshape(-1, self.p)
             xtheta = jnp.hstack((x, theta))
-            return self.model.output_fcn(xtheta, params)
-        return fcn_jax, self.model.params
+            return self.model.output_fcn(xtheta, self.model.params)
+        return fcn_jax

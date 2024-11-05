@@ -55,7 +55,7 @@ print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
 
 # export to jax
 
-f, weights = pcf.tojax()
+f = pcf.tojax()
 
 # evaluate f_true and f for for theta = a M1 + (1-a) M2, with M1, M2 random psd matrices and a in [0, 1]
 
@@ -81,7 +81,7 @@ for th in theta_:
         for j, x2 in enumerate(X2_test):
             x = np.array([x1, x2])
             y_true[i, j] = f_true(x, th.flatten())
-            y[i, j] = f(x.reshape(1, n), th.flatten().reshape(1, n**2), weights)[0, 0]
+            y[i, j] = f(x.reshape(1, n), th.flatten().reshape(1, n**2))[0, 0]
     y_true_.append(y_true)
     y_.append(y)
     

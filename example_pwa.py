@@ -57,7 +57,7 @@ print(f"lambda value: {stats['lambda']}")
 
 # export to jax
 
-f, weights = pcf.tojax()
+f = pcf.tojax()
 
 # evaluate f_true and f for 6 random points in Theta, over a grid of 100 points in X
 
@@ -69,7 +69,7 @@ y_true_, y_, theta_ = [], [], []
 for _ in range(6):
     theta = -1 + 2 * np.random.rand(4)
     y_true_.append(f_true(x_, theta))
-    y_.append(f(x_, np.tile(theta, (len(x_), 1)), weights))
+    y_.append(f(x_, np.tile(theta, (len(x_), 1))))
     theta_.append(theta)
     
 # pickle x_, y_true_, y_, theta_
