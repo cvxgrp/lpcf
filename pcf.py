@@ -283,7 +283,7 @@ class PCF:
                 jW = j - 1  # because W_psi1 does not exist
                 out = self.act_psi_jax(W_psi[jW] @ out + V_psi[j] @ theta + b_psi[j])
             out = W_psi[-1] @ out + V_psi[-1] @ theta + b_psi[-1]
-            return out
+            return out.squeeze()
         
         return psi
     
