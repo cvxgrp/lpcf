@@ -1,19 +1,17 @@
 """
 Fit performance index associated with state and input trajectories of a dynamical system.
 
-The optimization vector is a feedback gain K, u=Kx, the parameter is the current
+The optimization vector is a feedback gain K, u=Kx, the parameter is the current state.
 
 A. Bemporad, November 5, 2024
 """
 import pickle
 import numpy as np
 import cvxpy as cp
-import matplotlib.pyplot as plt
 from pcf import PCF
 import jax
 import jax.numpy as jnp
 import jaxopt
-from functools import partial
 from jax_sysid.utils import lbfgs_options
 from control import dlqr
 
