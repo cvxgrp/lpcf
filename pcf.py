@@ -75,8 +75,8 @@ class PCF:
         
         self.widths = widths
         self.widths_psi = widths_psi
-        self.L = len(widths) + 1 if widths else None
-        self.L_psi = len(widths_psi) + 1 if widths_psi else None
+        self.L = len(widths) + 1 if widths is not None else None
+        self.L_psi = len(widths_psi) + 1 if widths_psi is not None else None
         
         self.d, self.n, self.p, self.m, self.N = None, None, None, None, None
         self.section_W, self.section_V, self.section_omega = None, None, None
@@ -137,11 +137,11 @@ class PCF:
             W_psi = weights[self.indices.W_psi:self.indices.V_psi]
             V_psi = weights[self.indices.V_psi:self.indices.b_psi]
             b_psi = weights[self.indices.b_psi:]
-            out = self.act_psi_jax(V_psi[0] @ theta.T + b_psi[0])
-            for j in range(1, self.L_psi - 1):
+            out = V_psi[0] @ theta.T + b_psi[0]
+            for j in range(1, self.L_psi):
                 jW = j - 1  # because W_psi1 does not exist
-                out = self.act_psi_jax(W_psi[jW] @ out + V_psi[j] @ theta.T + b_psi[j])
-            out = W_psi[-1] @ out + V_psi[-1] @ theta.T + b_psi[-1]
+                out = self.act_psi_jax(out)
+                out = W_psi[jW] @ out + V_psi[j] @ theta.T + b_psi[j]
             W, V, omega = [], [], []
             for s in self.section_W:
                 W.append(_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
@@ -156,11 +156,11 @@ class PCF:
             x = xtheta[:, :self.n]
             theta = xtheta[:, self.n:]
             W, V, omega = _psi_fcn(theta, weights)
-            y = self.act_jax(map_matmul(V[0], x) + omega[0])
-            for j in range(1, self.L - 1):
+            y = map_matmul(V[0], x) + omega[0]
+            for j in range(1, self.L):
                 jW = j - 1  # because W1 does not exist
-                y = self.act_jax(map_matmul(W[jW], y) + map_matmul(V[j], x) + omega[j])
-            y = map_matmul(W[-1], y) + map_matmul(V[-1], x) + omega[-1]
+                y = self.act_jax(y)
+                y = map_matmul(W[jW], y) + map_matmul(V[j], x) + omega[j]
             return y
         
         self.model = StaticModel(self.d, self.n + self.p, _fcn)
@@ -278,11 +278,11 @@ class PCF:
             W_psi = self.weights[self.indices.W_psi:self.indices.V_psi]
             V_psi = self.weights[self.indices.V_psi:self.indices.b_psi]
             b_psi = self.weights[self.indices.b_psi:]
-            out = self.act_psi_jax(V_psi[0] @ theta + b_psi[0])
-            for j in range(1, self.L_psi - 1):
+            out = V_psi[0] @ theta + b_psi[0]
+            for j in range(1, self.L_psi):
                 jW = j - 1  # because W_psi1 does not exist
-                out = self.act_psi_jax(W_psi[jW] @ out + V_psi[j] @ theta + b_psi[j])
-            out = W_psi[-1] @ out + V_psi[-1] @ theta + b_psi[-1]
+                out = self.act_psi_jax(out)
+                out = W_psi[jW] @ out + V_psi[j] @ theta + b_psi[j]
             return out.squeeze()
         
         return psi
@@ -312,11 +312,11 @@ class PCF:
             omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
 
         # Evaluate convex objective function(s)
-        y = self.act_cvxpy(V[0] @ x + omega[0])
-        for j in range(1, self.L - 1):
+        y = V[0] @ x + omega[0]
+        for j in range(1, self.L):
             jW = j - 1  # because W1 does not exist
-            y = self.act_cvxpy(W[jW] @ y + V[j] @ x + omega[j])
-        y = W[-1] @ y + V[-1] @ x + omega[-1]
+            y = self.act_cvxpy(y)
+            y = W[jW] @ y + V[j] @ x + omega[j]
         return y
 
     def tojax(self) -> Tuple[Callable, List[np.ndarray]]:
