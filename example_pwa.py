@@ -66,7 +66,7 @@ np.random.seed(0)
 x_ = np.linspace(-1, 1, 100)
 
 y_true_, y_, theta_ = [], [], []
-for _ in range(6):
+for _ in range(9):
     theta = -1 + 2 * np.random.rand(4)
     y_true_.append(f_true(x_, theta))
     y_.append(f(x_, np.tile(theta, (len(x_), 1))))
@@ -78,7 +78,7 @@ with open('example_pwa.pkl', 'wb') as f:
 
 # plot
 
-fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+fig, axes = plt.subplots(3, 3, figsize=(15, 12))
 
 for i, ax in enumerate(axes.flat):
     ax.plot(x_, y_true_[i], label='y_true')
