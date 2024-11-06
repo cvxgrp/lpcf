@@ -14,6 +14,7 @@ import jax.numpy as jnp
 import jaxopt
 from jax_sysid.utils import lbfgs_options
 from control import dlqr
+import matplotlib.pyplot as plt
 
 TrainModel=1
 
@@ -29,14 +30,17 @@ Q=Q.T@Q # unknown weight on states
 R = np.random.randn(nu,nu)
 R=R.T@R # unknown weight on inputs
 
-N1=100 # length of experiment to compute performance index
+N1=20 # length of experiment to compute performance index
 N2=1 # number of steps the performance index is evaluated along the state trajectory
-N3=2000 # number of experiments with different policies
+N3=50000 # number of experiments with different policies
 
 A = np.array([[.5,.3,0],[.3,-.5,.2],[.5,-.4,0]]) # unknown linear system matrix
 B = np.array([[.3],[-.4],[.5]]) # unknown linear system matrix
 A=A[:nx,:nx]
 B=B[:nx,:nu]
+
+KLQR = -dlqr(A,B,Q,R)[0].reshape(-1) # optimal feedback gain
+
 @jax.jit
 def dynamics(x, u):
     # unknown linear system dynamics
@@ -57,6 +61,7 @@ def closed_loop_simulation(x0, K):
 
 @jax.jit
 def loss(X,U):
+    #loss = jnp.log(.00001+jnp.sum(X@Q*X) + jnp.sum(U@R*U))
     loss = jnp.sum(X@Q*X) + jnp.sum(U@R*U)
     return loss
 
@@ -72,7 +77,7 @@ Theta=list()
 
 for k in range(N3):
     x0 = np.random.randn(nx,1)
-    K = np.random.randn(nu,nx)
+    K = np.random.rand(nu,nx)-.5
     XX,UU = closed_loop_simulation(x0, K) # closed-loop trajectories
     loss0 = loss(XX,UU)
     if loss0<1.e2:
@@ -92,11 +97,42 @@ Theta = np.array(Theta).reshape(-1,nx)
 # print(loss(XX[:N1,:],UU[:N1,:]), Y[130])
     
 # fit
+plotfigs=1  # plot figures
+if plotfigs and nx==2:
+    ub = 1.5*np.ones(nx)
+    lb = -1.5*np.ones(nx)
+    dx=(ub-lb)/50.
 
-pcf = PCF(activation='relu', widths=[30,30], widths_psi=[nx])
+    [xx, yy] = np.meshgrid(np.arange(lb[0], ub[0]+dx[0], dx[0]),
+                            np.arange(lb[1], ub[1]+dx[1], dx[1]))
+    xy = np.block([[xx.reshape(-1)],[yy.reshape(-1)]]).T
+
+    @jax.jit
+    def true_loss(K,x0):
+        XX,UU = closed_loop_simulation(x0, K.reshape(nu,nx))
+        return loss(XX,UU) #jnp.minimum(loss(XX,UU),50.)
+    
+    n1=3
+    n2=3
+    fig,ax=plt.subplots(n1,n2,figsize=(10,5))
+    for k in range(np.prod(ax.shape)):
+        x0 = .5*np.random.randn(nx,1)
+        zz = np.array([true_loss(K.reshape(nu,nx),x0) for K in xy])
+        zz = np.minimum(zz.reshape(xx.shape),50.) # clip loss for plotting
+        ax[k//n1,k%n2].contourf(xx, yy, zz, alpha=0.6, levels=30)
+        ax[k//n1,k%n2].contour(xx, yy, zz, linewidths=1.0, levels=30)
+        ax[k//n1,k%n2].set_title(f'x0={np.round(x0.flatten("c")*100)/100.} (true)')
+        ax[k//n1,k%n2].set_xlim([lb[0],ub[0]])
+        ax[k//n1,k%n2].set_ylim([lb[1],ub[1]])
+        ax[k//n1,k%n2].scatter(KLQR[0],KLQR[1],color='r',marker='x')
+        ax[k//n1,k%n2].text(KLQR[0]+.1,KLQR[1],color='r',s='LQR')
+    plt.show()
+
+
+pcf = PCF(activation='logistic', widths=[10,10], widths_psi=[10,10])
 
 if TrainModel:
-    stats = pcf.fit(Y, X, Theta, seeds=np.arange(10), cores=10)
+    stats = pcf.fit(Y, X, Theta, rho_th=1.e-4, seeds=np.arange(10), cores=10)
     data = {"params": pcf.model.params, "stats": stats}
     pickle.dump(data, open('control_policy_data.pkl', 'wb'))
 
@@ -132,8 +168,6 @@ f_jax = pcf.tojax() # get the jax function and parameters: y = f_jax(x,theta,par
 #ypred = f_jax(X[0].reshape(-1),Theta[0].reshape(-1))
 
 options = lbfgs_options(iprint=-1, iters=1000, lbfgs_tol=1.e-6, memory=20)
-
-KLQR = -dlqr(A,B,Q,R)[0].reshape(-1) # optimal feedback gain
 
 for k in range(10):
     @jax.jit
