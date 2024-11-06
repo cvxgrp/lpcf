@@ -162,5 +162,5 @@ for k in range(10):
     Xopt3 = simulation(x0.reshape(-1,1), Uopt3)
     loss3 = np.sum(stage_cost(Xopt3,Uopt3))
 
-    print(f"k={k+1: 3d}, cost = {loss1: 10.5f} (learned), {loss3: 10.5f} (true), {loss2: 10.5f} (LQR)")
+    print(f"k={k+1: 3d}, cost = {loss1: 12.8f} (learned), {loss3: 12.8f} (true), {loss2: 12.8f} (LQR)")
     
