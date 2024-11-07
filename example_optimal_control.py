@@ -17,7 +17,7 @@ import jaxopt
 from jax_sysid.utils import lbfgs_options
 from control import dlqr
 
-TrainModel=1
+TrainModel=0
 
 seed = 0
 np.random.seed(seed)
@@ -73,10 +73,10 @@ X = np.array([U[k:k+M,:].reshape(-1) for k in range(N-M)])
 Y = np.array(Y).reshape(-1,1)
 Y = Y/np.max(Y) # normalize function values
 
-pcf = PCF(activation='logistic', widths=[20,20], widths_psi=[nx])
+pcf = PCF(activation='logistic', widths=[20,20], widths_psi=[10])
 
 if TrainModel:
-    stats = pcf.fit(Y, X, Theta, rho_th=1.e-4, seeds=np.arange(10), cores=10)
+    stats = pcf.fit(Y, X, Theta, rho_th=1.e-8, tau_th=1.e-5, seeds=np.arange(10), cores=10)
     data = {"params": pcf.model.params, "stats": stats}
     pickle.dump(data, open('optimal_control.pkl', 'wb'))
 
@@ -89,24 +89,26 @@ else:
 print(f"Elapsed time: {stats['time']} s")
 print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
 
+# sparsity analysis
+w=np.block([pcf.model.params[i].ravel() for i in range(len(pcf.model.params))])
+nonzeros = np.sum(np.abs(w)>pcf.model.zero_coeff)
+print(f"Number of non-zero parameters: {nonzeros} out of {len(w)} ({100*nonzeros/len(w):.2f}%)")
 
-if 0:
-    # export to cvxpy
-    U = cp.Variable((M*nu,1))
-    x = cp.Parameter((nx,1))
-    cvx_loss = pcf.tocvxpy(U,x)
+Yhat = pcf.model.predict(np.hstack((X, Theta)))
+RMS = np.sqrt(np.sum((Y-Yhat)**2)/Y.shape[0])
+print(f"RMS error on scaled training data: {RMS}")
 
-    # Test
-    x.value = np.random.randn(nx,1)
-    U.value = np.random.randn(M*nu,1)
-    cvx_loss.value
+# export to cvxpy
+U = cp.Variable((M*nu,1))
+x = cp.Parameter((nx,1))
+cvx_loss = pcf.tocvxpy(U,x)
+# # Test
+#x.value = np.random.randn(nx,1)
+#U.value = np.random.randn(M*nu,1)
+#cvx_loss.value
+cvx_prob = cp.Problem(cp.Minimize(cvx_loss + 1.e-4*cp.sum_squares(U))) # add regularization term to avoid unboundedness!!!
 
-    #cvx_prob = cp.Problem(cp.Minimize(cvx_loss))
-    #cvx_prob.solve()
-    #U.value
-else:
-    pass
-    
+  
 # export to jax 
 f_jax = pcf.tojax() # get the jax function and parameters: y = f_jax(x,theta,params)
 #ypred = f_jax(X[0].reshape(-1),Theta[0].reshape(-1))
@@ -138,15 +140,23 @@ def true_loss(U,x0):
     loss = jnp.sum(X@Q*X) + jnp.sum(U.reshape(M,nu)@R*U.reshape(M,nu))
     return loss
 
+useLBFGS=1 # 0 = use LBFGS, 1 = use cvxpy
+
 for k in range(10):
-    @jax.jit
-    def fun(U):
-        return f_jax(U, x0)[0][0]
     x0 = np.random.randn(nx)
-    U0=jnp.zeros(M*nu)
-    theoptions=options.copy()
-    solver=jaxopt.ScipyMinimize(fun=fun, method="L-BFGS-B", options=theoptions, maxiter=1000)
-    Uopt, status = solver.run(U0)
+    if useLBFGS:
+        @jax.jit
+        def fun(U):
+            return f_jax(U, x0)[0][0]
+        U0=jnp.zeros(M*nu)
+        theoptions=options.copy()
+        solver=jaxopt.ScipyMinimize(fun=fun, method="L-BFGS-B", options=theoptions, maxiter=1000)
+        Uopt, status = solver.run(U0)
+    else:
+        x.value = x0.reshape(nx,1)
+        cvx_prob.solve(solver=cp.CLARABEL, verbose=False)    
+        Uopt = U.value
+
     Uopt=Uopt.reshape(M,nu)
     Xopt = simulation(x0.reshape(-1,1), Uopt)
     loss1 = np.sum(stage_cost(Xopt,Uopt))
@@ -156,6 +166,7 @@ for k in range(10):
 
     theoptions=options.copy()
     solver=jaxopt.ScipyMinimize(fun=true_loss, method="L-BFGS-B", options=theoptions, maxiter=1000)
+    U0=jnp.zeros(M*nu)
     Uopt3, status = solver.run(U0, x0=x0)
     Uopt3=Uopt3.reshape(M,nu)
     Xopt3 = simulation(x0.reshape(-1,1), Uopt3)
