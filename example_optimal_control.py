@@ -27,11 +27,9 @@ nx = 3 # number of states
 nu = 1 # number of inputs
 
 Q = np.random.randn(nx,nx)
-Q=Q.T@Q # unknown weight on states
+Q=np.round(10.*Q.T@Q)/10.+np.eye(nx) # unknown weight on states
 R = np.random.randn(nu,nu)
-R=R.T@R # unknown weight on inputs
-
-N=10000 # length of experiment
+R=np.round(10.*R.T@R )/10.+np.eye(nu) # unknown weight on inputs
 
 A = np.array([[.5,.3,0],[.3,-.5,.2],[.5,-.4,0]]) # unknown linear system matrix
 B = np.array([[.3],[-.4],[.5]]) # unknown linear system matrix
@@ -56,6 +54,7 @@ def stage_cost(X,U):
 # dimension of optimization vector = number of entries of policy u=Kx
 M = 10 # number of control steps optimized
 n = M*nu # number of optimization variables
+N=5000+M # length of experiment
 
 # data generating (true) function
 
@@ -63,8 +62,8 @@ Y=list()
 X=list()
 Theta=list()
 
-x0 = np.random.randn(nx,1)
-U = np.random.randn(N,nu)
+x0 = np.zeros((nx,1))
+U = 2.*np.random.rand(N,nu)-1.
 X = simulation(x0, U)
 cost = stage_cost(X,U)
 Y = np.array([np.sum(cost[k:k+M]) for k in range(N-M)])
