@@ -94,7 +94,6 @@ class PCF:
         self.act_psi_cvxpy = self._get_act(activation_psi, 'cvxpy')
         
         self.model = None
-        self.weights = None
         self.indices = None
         
     def _get_act(self, activation, interface) -> Callable:
@@ -117,10 +116,8 @@ class PCF:
         for list_ in [W_psi, V_psi]:
             indices.append(indices[-1] + len(list_))
         self.indices = Indices(*indices)
-        
-        self.weights = W_psi + V_psi + b_psi
-        
-        return self.weights
+                
+        return W_psi + V_psi + b_psi
     
     def _rand(self, first_dim, second_dim) -> np.ndarray:
         return np.random.rand(first_dim, second_dim) - 0.5
@@ -255,7 +252,6 @@ class PCF:
         Yhat = self.model.predict(XTheta)
         R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
 
-        self.weights = self.model.params
         return {'time': t, 'R2': R2, 'msg': msg, 'lambda': tau_th}
     
     def _fit_data(self, Y, XTheta, seeds, cores) -> None:
@@ -275,9 +271,9 @@ class PCF:
         
         @jax.jit
         def psi(theta):
-            W_psi = self.weights[self.indices.W_psi:self.indices.V_psi]
-            V_psi = self.weights[self.indices.V_psi:self.indices.b_psi]
-            b_psi = self.weights[self.indices.b_psi:]
+            W_psi = self.model.params[self.indices.W_psi:self.indices.V_psi]
+            V_psi = self.model.params[self.indices.V_psi:self.indices.b_psi]
+            b_psi = self.model.params[self.indices.b_psi:]
             out = V_psi[0] @ theta + b_psi[0]
             for j in range(1, self.L_psi):
                 jW = j - 1  # because W_psi1 does not exist
@@ -305,9 +301,9 @@ class PCF:
         WVomega_flat = cp.CallbackParam(lambda: psi_flat(theta.value), (self.m,))
         W, V, omega = [], [], []
         for s in self.section_W:
-            W.append(_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape)))  # enforce W weights to be nonnegative
+            W.append(_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape, order='C')))  # enforce W weights to be nonnegative
         for s in self.section_V:
-            V.append(WVomega_flat[s.start:s.end].reshape(s.shape))
+            V.append(WVomega_flat[s.start:s.end].reshape(s.shape, order='C'))
         for s in self.section_omega:
             omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
 
