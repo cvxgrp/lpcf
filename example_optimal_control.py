@@ -1,5 +1,5 @@
 """
-Fit performance index associated with state and input trajectories of a dynamical system.
+Fit performance index associated with output and input trajectories of a dynamical system.
 
 The optimization vector is the sequence of control inputs, the parameter is the initial states.
 
@@ -25,6 +25,7 @@ np.random.seed(seed)
 # Generate data from random initial states and random inputs
 nx = 3 # number of states
 nu = 1 # number of inputs
+ny = 1 # number of outputs
 
 Q = np.random.randn(nx,nx)
 Q=np.round(10.*Q.T@Q)/10.+np.eye(nx) # unknown weight on states
@@ -33,22 +34,30 @@ R=np.round(10.*R.T@R )/10.+np.eye(nu) # unknown weight on inputs
 
 A = np.array([[.5,.3,0],[.3,-.5,.2],[.5,-.4,0]]) # unknown linear system matrix
 B = np.array([[.3],[-.4],[.5]]) # unknown linear system matrix
+C = np.array([[1.,.2,-.1]]) # unknown output matrix coefficients
+D = np.array([[0]]) # unknown output matrix feedthrough coefficients
 A=A[:nx,:nx]
 B=B[:nx,:nu]
+C=C[:ny,:nx]
+D=D[:ny,:nu]
+R=0.1 # input weight
+
 @jax.jit
 def dynamics(x, u):
     # unknown linear system dynamics
     xnext = (A@x.reshape(-1,1)+B@u.reshape(-1,1)).reshape(-1,1)
-    return xnext, x
+    y = (C@x.reshape(-1,1)+D@u.reshape(-1,1)).reshape(-1,1)
+    return xnext, jnp.vstack((x,y))
 
 @jax.jit
 def simulation(x0, U):    
-    _, X = jax.lax.scan(dynamics, jnp.array(x0), U)
-    return np.squeeze(X) # return state and input trajectories
+    _, XY = jax.lax.scan(dynamics, jnp.array(x0), U)
+    return np.squeeze(XY)[:,:nx], np.squeeze(XY)[:,nx:] # return state and output trajectories
 
 @jax.jit
-def stage_cost(X,U):
-    loss = jnp.sum(X@Q*X,axis=1) + jnp.sum(U@R*U, axis=1)
+def stage_cost(Y,U):
+    #loss = jnp.sum(X@Q*X,axis=1) + jnp.sum(U@R*U, axis=1)
+    loss = jnp.sum(Y**2,axis=1) + R*jnp.sum(U**2,axis=1)
     return loss
 
 # dimension of optimization vector = number of entries of policy u=Kx
@@ -57,32 +66,27 @@ n = M*nu # number of optimization variables
 N=5000+M # length of experiment
 
 # data generating (true) function
-
-Y=list()
-X=list()
-Theta=list()
-
 x0 = np.zeros((nx,1))
 U = 2.*np.random.rand(N,nu)-1.
-X = simulation(x0, U)
-cost = stage_cost(X,U)
-Y = np.array([np.sum(cost[k:k+M]) for k in range(N-M)])
+X,Y = simulation(x0, U)
+cost = stage_cost(Y,U)
+F = np.array([np.sum(cost[k:k+M]) for k in range(N-M)])
 Theta = X[:N-M,:]
 X = np.array([U[k:k+M,:].reshape(-1) for k in range(N-M)])
 
-Y = np.array(Y).reshape(-1,1)
-Y = Y/np.max(Y) # normalize function values
+F = np.array(F).reshape(-1,1)
+F = F/np.max(F) # normalize function values
 
 pcf = PCF(activation='logistic', widths=[20,20], widths_psi=[10])
 
 if TrainModel:
-    stats = pcf.fit(Y, X, Theta, rho_th=1.e-8, tau_th=1.e-5, seeds=np.arange(10), cores=10)
+    stats = pcf.fit(F, X, Theta, rho_th=1.e-8, tau_th=1.e-5, seeds=np.arange(10), cores=10)
     data = {"params": pcf.model.params, "stats": stats}
     pickle.dump(data, open('optimal_control.pkl', 'wb'))
 
 else:
     data = pickle.load(open('optimal_control.pkl', 'rb'))
-    pcf.fit(Y[0:10], X[0:10], Theta[0:10], seeds=0, adam_epochs=0, lbfgs_epochs=1) # dummy fit to initialize model
+    pcf.fit(F[0:10], X[0:10], Theta[0:10], seeds=0, adam_epochs=0, lbfgs_epochs=1) # dummy fit to initialize model
     pcf.model.params = data["params"]
     stats = data["stats"]
     
@@ -94,8 +98,8 @@ w=np.block([pcf.model.params[i].ravel() for i in range(len(pcf.model.params))])
 nonzeros = np.sum(np.abs(w)>pcf.model.zero_coeff)
 print(f"Number of non-zero parameters: {nonzeros} out of {len(w)} ({100*nonzeros/len(w):.2f}%)")
 
-Yhat = pcf.model.predict(np.hstack((X, Theta)))
-RMS = np.sqrt(np.sum((Y-Yhat)**2)/Y.shape[0])
+Fhat = pcf.model.predict(np.hstack((X, Theta)))
+RMS = np.sqrt(np.sum((F-Fhat)**2)/F.shape[0])
 print(f"RMS error on scaled training data: {RMS}")
 
 # export to cvxpy
@@ -106,7 +110,7 @@ cvx_loss = pcf.tocvxpy(U,x)
 #x.value = np.random.randn(nx,1)
 #U.value = np.random.randn(M*nu,1)
 #cvx_loss.value
-cvx_prob = cp.Problem(cp.Minimize(cvx_loss + 1.e-4*cp.sum_squares(U))) # add regularization term to avoid unboundedness!!!
+cvx_prob = cp.Problem(cp.Minimize(cvx_loss)) # add regularization term to avoid unboundedness!!!
 
   
 # export to jax 
@@ -118,26 +122,28 @@ options = lbfgs_options(iprint=-1, iters=1000, lbfgs_tol=1.e-6, memory=20)
 @jax.jit
 def closed_loop_dynamics(x, K):
     u=K.reshape(nu,nx)@x.reshape(nx,1)
-    xnext = dynamics(x,u.ravel())[0]
-    xu = jnp.vstack((x,u))
-    return xnext, xu
+    xnext, xy = dynamics(x,u.ravel())
+    xyu = jnp.vstack((xy,u))
+    return xnext, xyu
     
 @jax.jit
 def closed_loop_simulation(x0, K):    
-    _, XU = jax.lax.scan(closed_loop_dynamics, jnp.array(x0), jnp.tile(K,[M,1]))
-    return XU[:,:nx].reshape(-1,nx),XU[:,nx:].reshape(-1,nu) # return state and input trajectories
+    _, XYU = jax.lax.scan(closed_loop_dynamics, jnp.array(x0), jnp.tile(K,[M,1]))
+    return XYU[:,:nx].reshape(-1,nx),XYU[:,nx:nx+ny].reshape(-1,ny), XYU[:,nx+ny:].reshape(-1,nu)
 
-KLQR = -dlqr(A,B,Q,R)[0].reshape(-1) # optimal feedback gain
+#KLQR = -dlqr(A,B,Q,R)[0].reshape(-1) # optimal feedback gain
+KLQR = -dlqr(A,B,C.T@C,R)[0].reshape(-1) # optimal feedback gain
 
 @jax.jit
 def simulation(x0, U):    
-    _, X = jax.lax.scan(dynamics, jnp.array(x0), U)
-    return np.squeeze(X) # return state and input trajectories
+    _, XY= jax.lax.scan(dynamics, jnp.array(x0), U)
+    return np.squeeze(XY)[:,:nx],np.squeeze(XY)[:,nx:] # return state and output trajectories
 
 @jax.jit
 def true_loss(U,x0):
-    X=simulation(x0.reshape(-1,1),U.reshape(M,nu))
-    loss = jnp.sum(X@Q*X) + jnp.sum(U.reshape(M,nu)@R*U.reshape(M,nu))
+    _,Y=simulation(x0.reshape(-1,1),U.reshape(M,nu))
+    #loss = jnp.sum(X@Q*X) + jnp.sum(U.reshape(M,nu)@R*U.reshape(M,nu))
+    loss = jnp.sum(Y**2) + R*jnp.sum(U**2)
     return loss
 
 useLBFGS=1 # 0 = use LBFGS, 1 = use cvxpy
@@ -158,19 +164,19 @@ for k in range(10):
         Uopt = U.value
 
     Uopt=Uopt.reshape(M,nu)
-    Xopt = simulation(x0.reshape(-1,1), Uopt)
-    loss1 = np.sum(stage_cost(Xopt,Uopt))
+    Xopt,Yopt = simulation(x0.reshape(-1,1), Uopt)
+    loss1 = np.sum(stage_cost(Yopt,Uopt))
 
-    XX2,UU2 = closed_loop_simulation(x0.reshape(-1,1), KLQR.reshape(1,-1))
-    loss2 = np.sum(stage_cost(XX2,UU2))
+    XX2,YY2,UU2 = closed_loop_simulation(x0.reshape(-1,1), KLQR.reshape(1,-1))
+    loss2 = np.sum(stage_cost(YY2,UU2))
 
     theoptions=options.copy()
     solver=jaxopt.ScipyMinimize(fun=true_loss, method="L-BFGS-B", options=theoptions, maxiter=1000)
     U0=jnp.zeros(M*nu)
     Uopt3, status = solver.run(U0, x0=x0)
     Uopt3=Uopt3.reshape(M,nu)
-    Xopt3 = simulation(x0.reshape(-1,1), Uopt3)
-    loss3 = np.sum(stage_cost(Xopt3,Uopt3))
+    Xopt3,Yopt3 = simulation(x0.reshape(-1,1), Uopt3)
+    loss3 = np.sum(stage_cost(Yopt3,Uopt3))
 
     print(f"k={k+1: 3d}, cost = {loss1: 12.8f} (learned), {loss3: 12.8f} (true), {loss2: 12.8f} (LQR)")
     
