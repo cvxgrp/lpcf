@@ -146,11 +146,18 @@ def true_loss(U,x0):
     loss = jnp.sum(Y**2) + R*jnp.sum(U**2)
     return loss
 
-useLBFGS=1 # 0 = use LBFGS, 1 = use cvxpy
+Nval = 1000 # number of validation samples
+xmin = np.array(jnp.min(Theta,axis=0))
+xmax = np.array(jnp.max(Theta,axis=0))
 
-for k in range(10):
-    x0 = np.random.randn(nx)
-    if useLBFGS:
+X0 = list()
+LOSS_MIN = list()
+TRUE_LOSS_MIN = list()
+
+for k in range(Nval):
+    x0 = (xmax-xmin)*np.random.rand(nx)+xmin
+    if 0:
+        # Minimize the surrogate via LBFGS
         @jax.jit
         def fun(U):
             return f_jax(U, x0)[0][0]
@@ -158,9 +165,10 @@ for k in range(10):
         theoptions=options.copy()
         solver=jaxopt.ScipyMinimize(fun=fun, method="L-BFGS-B", options=theoptions, maxiter=1000)
         Uopt, status = solver.run(U0)
-    else:
+    else:   
+        # Minimize the surrogate via CVXPY
         x.value = x0.reshape(nx,1)
-        cvx_prob.solve(solver=cp.CLARABEL, verbose=False)    
+        cvx_prob.solve()    
         Uopt = U.value
 
     Uopt=Uopt.reshape(M,nu)
@@ -170,6 +178,7 @@ for k in range(10):
     XX2,YY2,UU2 = closed_loop_simulation(x0.reshape(-1,1), KLQR.reshape(1,-1))
     loss2 = np.sum(stage_cost(YY2,UU2))
 
+    # True loss
     theoptions=options.copy()
     solver=jaxopt.ScipyMinimize(fun=true_loss, method="L-BFGS-B", options=theoptions, maxiter=1000)
     U0=jnp.zeros(M*nu)
@@ -179,4 +188,13 @@ for k in range(10):
     loss3 = np.sum(stage_cost(Yopt3,Uopt3))
 
     print(f"k={k+1: 3d}, cost = {loss1: 12.8f} (learned), {loss3: 12.8f} (true), {loss2: 12.8f} (LQR)")
-    
+
+    X0.append(x0)
+    LOSS_MIN.append(loss1)
+    TRUE_LOSS_MIN.append(loss3)
+
+LOSS_MIN = np.array(LOSS_MIN)
+TRUE_LOSS_MIN = np.array(TRUE_LOSS_MIN)
+
+RMS_MIN = np.sqrt(np.sum((TRUE_LOSS_MIN-LOSS_MIN)**2)/Nval)
+print(f"RMS error of minima on scaled training data: {RMS_MIN}")
