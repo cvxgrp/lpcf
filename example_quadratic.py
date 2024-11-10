@@ -66,8 +66,8 @@ X1_test             = np.linspace(-1, 1, K)
 X2_test             = np.linspace(-1, 1, K)
 X1_grid, X2_grid    = np.meshgrid(X1_test, X2_test)
 
-factors = [np.random.rand(n, n) * np.tri(n) for _ in range(2)]
-summands = [np.random.rand(n, n) for _ in range(1)]
+factors = [np.random.rand(n, n) * np.tri(n) for _ in range(5)]
+summands = [np.random.rand(n, n) for _ in range(5)]
 for i in range(len(summands)):
     summands[i] -= 0.5 * np.diag(np.diag(summands[i]))
 theta_ = [factor @ factor.T for factor in factors] + [summand + summand.T for summand in summands]

@@ -66,7 +66,7 @@ np.random.seed(0)
 x_ = np.linspace(-1, 1, 100)
 
 y_true_, y_, theta_ = [], [], []
-for _ in range(9):
+for _ in range(1000):
     theta = -1 + 2 * np.random.rand(4)
     y_true_.append(f_true(x_, theta))
     y_.append(f(x_, np.tile(theta, (len(x_), 1))))
