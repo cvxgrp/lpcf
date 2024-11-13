@@ -73,10 +73,9 @@ class PCF:
         
         # initialize structure, None values inferred later via data dimenions
         
-        self.widths = widths
-        self.widths_psi = widths_psi
-        self.L = len(widths) + 1 if widths is not None else None
-        self.L_psi = len(widths_psi) + 1 if widths_psi is not None else None
+        self.widths, self.widths_psi = widths, widths_psi        
+        self.w, self.w_psi = None, None
+        self.L, self.L_psi = None, None
         
         self.d, self.n, self.p, self.m, self.N = None, None, None, None, None
         self.section_W, self.section_V, self.section_omega = None, None, None
@@ -107,10 +106,10 @@ class PCF:
         V_psi = []
         b_psi = []
         for l in range(2, self.L_psi + 1):  # W_psi1 does not exist
-            W_psi.append(self._rand(self.widths_psi[l], self.widths_psi[l-1]))
+            W_psi.append(self._rand(self.w_psi[l], self.w_psi[l-1]))
         for l in range(1, self.L_psi + 1):
-            V_psi.append(self._rand(self.widths_psi[l], self.p))
-            b_psi.append(self._rand(self.widths_psi[l], 1))
+            V_psi.append(self._rand(self.w_psi[l], self.p))
+            b_psi.append(self._rand(self.w_psi[l], 1))
         
         indices = [0]
         for list_ in [W_psi, V_psi]:
@@ -187,38 +186,38 @@ class PCF:
         self.p = Theta.shape[1]
         
         if self.widths is None:
-            width_inner = 2 * ((self.n + self.d) // 2)
-            self.widths = [self.n, width_inner, width_inner, self.d]
+            w_inner = 2 * ((self.n + self.d) // 2)
+            self.w = [self.n, w_inner, w_inner, self.d]
         else:
-            self.widths = [self.n] + self.widths + [self.d]
-        self.L = len(self.widths[1:])
+            self.w = [self.n] + self.widths + [self.d]
+        self.L = len(self.w[1:])
 
         self.section_W = []
         self.section_V = []
         self.section_omega = []
         offset = 0
         for l in range(2, self.L + 1):  # W_psi1 does not exist
-            shape = (self.widths[l], self.widths[l - 1])
+            shape = (self.w[l], self.w[l - 1])
             size = np.prod(shape)
             self.section_W.append(Section(offset, offset + size, shape))
             offset += size
         for l in range(1, self.L + 1):
-            shape = (self.widths[l], self.n)
+            shape = (self.w[l], self.n)
             size = np.prod(shape)
             self.section_V.append(Section(offset, offset + size, shape))
             offset += size
         for l in range(1, self.L + 1):
-            size = self.widths[l]
+            size = self.w[l]
             self.section_omega.append(Section(offset, offset + size, (size,)))
             offset += size
         self.m = offset
         
         if self.widths_psi is None:
-            width_inner = (self.p + self.m) // 2
-            self.widths_psi = [self.p, width_inner, width_inner, self.m]
+            w_inner = (self.p + self.m) // 2
+            self.w_psi = [self.p, w_inner, w_inner, self.m]
         else:
-            self.widths_psi = [self.p] + self.widths_psi + [self.m]
-        self.L_psi = len(self.widths_psi[1:])
+            self.w_psi = [self.p] + self.widths_psi + [self.m]
+        self.L_psi = len(self.w_psi[1:])
 
         self._setup_model(seeds[0])
         self.model.optimization(adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
