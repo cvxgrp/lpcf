@@ -170,7 +170,7 @@ class PCF:
 
     def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=0., zero_coeff=1.e-4,
             seeds=None, cores=4, adam_epochs=200, lbfgs_epochs=2000,
-            tune=False, n_folds=5, warm_start=True) -> Dict[str, float]:
+            tune=False, n_folds=5, warm_start=None) -> Dict[str, float]:
         
         if Y.ndim == 1:
             # single output
@@ -181,6 +181,11 @@ class PCF:
         if Theta.ndim == 1:
             # single parameter
             Theta = Theta.reshape(-1, 1)
+            
+        if warm_start and self.cache is None:
+            raise ValueError('Trying to warm start before first training.')
+        if warm_start is None:
+            warm_start = self.cache is not None
             
         if seeds is None:
             seeds = 0 if warm_start else np.arange(max(10, cores))
