@@ -94,11 +94,19 @@ class PCF:
         
         self.model = None
         self.indices = None
+        self.cache = None
         
     def _get_act(self, activation, interface) -> Callable:
         return ACTIVATIONS[activation.lower()][interface]
+    
+    def _init_weights(self, seed=0, warm_start=False) -> List[np.ndarray]:
+        if warm_start:
+            if self.cache is None:
+                raise ValueError('Trying to warm start before first training.')
+            return self.cache
+        return self._rand_weights(seed)
         
-    def _init_weights(self, seed=0) -> List[np.ndarray]:
+    def _rand_weights(self, seed=0) -> List[np.ndarray]:
         
         np.random.seed(seed)
         
@@ -121,7 +129,7 @@ class PCF:
     def _rand(self, first_dim, second_dim) -> np.ndarray:
         return np.random.rand(first_dim, second_dim) - 0.5
 
-    def _setup_model(self, seed=0) -> None:
+    def _setup_model(self, seed=0, warm_start=False) -> None:
         """Initialize variable and parameter networks."""
         
         @jax.jit
@@ -160,11 +168,11 @@ class PCF:
             return y
         
         self.model = StaticModel(self.d, self.n + self.p, _fcn)
-        self.model.init(params=self._init_weights(seed))
+        self.model.init(params=self._init_weights(seed, warm_start))
 
     def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=0., zero_coeff=1.e-4,
             seeds=None, cores=4, adam_epochs=200, lbfgs_epochs=2000,
-            tune=False, n_folds=5) -> Dict[str, float]:
+            tune=False, n_folds=5, warm_start=False) -> Dict[str, float]:
         
         if Y.ndim == 1:
             # single output
@@ -177,7 +185,7 @@ class PCF:
             Theta = Theta.reshape(-1, 1)
             
         if seeds is None:
-            seeds = np.arange(max(10, cores))
+            seeds = 0 if warm_start else np.arange(max(10, cores))
         if not isinstance(seeds, np.ndarray):
             seeds = np.atleast_1d(seeds)
         
@@ -219,7 +227,7 @@ class PCF:
             self.w_psi = [self.p] + self.widths_psi + [self.m]
         self.L_psi = len(self.w_psi[1:])
 
-        self._setup_model(seeds[0])
+        self._setup_model(seeds[0], warm_start)
         self.model.optimization(adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
 
         @jax.jit
@@ -240,22 +248,25 @@ class PCF:
                 for j in range(n_folds):
                     Y_train, XTheta_train = np.vstack((Y[:j*f], Y[(j+1)*f:])), np.vstack((XTheta[:j*f], XTheta[(j+1)*f:]))
                     Y_val, XTheta_val = Y[j*f:(j+1)*f], XTheta[j*f:(j+1)*f]
-                    self._fit_data(Y_train, XTheta_train, seeds, cores)
+                    self._fit_data(Y_train, XTheta_train, seeds, cores, warm_start)
                     score += self._compute_r2(Y_val, self.model.predict(XTheta_val.reshape(-1, self.n + self.p)))
                 cv_scores[i] = score
             tau_th = tau_th_candidates[np.argmax(cv_scores)]
         self.model.loss(rho_th=rho_th, tau_th=tau_th, output_loss=output_loss, zero_coeff=zero_coeff)
-        self._fit_data(Y, XTheta, seeds, cores)
+        self._fit_data(Y, XTheta, seeds, cores, warm_start)
         t = time.time() - t
 
         Yhat = self.model.predict(XTheta)
         R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
+        
+        self.cache = self.model.params
 
         return {'time': t, 'R2': R2, 'msg': msg, 'lambda': tau_th}
     
-    def _fit_data(self, Y, XTheta, seeds, cores) -> None:
-        if cores > 1:
-            models = self.model.parallel_fit(Y, XTheta, self._init_weights, seeds=seeds, n_jobs=cores)
+    def _fit_data(self, Y, XTheta, seeds, cores, warm_start=False) -> None:
+        if len(seeds) > 1:
+            init_fun = lambda seed: self._init_weights(seed, warm_start)
+            models = self.model.parallel_fit(Y, XTheta, init_fun, seeds=seeds, n_jobs=cores)
             R2s = [self._compute_r2(Y, m.predict(XTheta.reshape(-1, self.n + self.p))) for m in models]
             ibest = np.argmax(R2s)
             self.model.params = models[ibest].params
