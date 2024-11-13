@@ -56,7 +56,7 @@ MAKE_POSITIVE = {
 class Indices:
     W_psi: int = 0
     V_psi: int = 0
-    b_psi: int = 0
+    omega_psi: int = 0
 
 
 @dataclass
@@ -75,7 +75,7 @@ class PCF:
         
         self.widths, self.widths_psi = widths, widths_psi        
         self.w, self.w_psi = None, None
-        self.L, self.L_psi = None, None
+        self.L, self.M = None, None
         
         self.d, self.n, self.p, self.m, self.N = None, None, None, None, None
         self.section_W, self.section_V, self.section_omega = None, None, None
@@ -110,19 +110,19 @@ class PCF:
         
         W_psi = []
         V_psi = []
-        b_psi = []
-        for l in range(2, self.L_psi + 1):  # W_psi1 does not exist
+        omega_psi = []
+        for l in range(2, self.M + 1):  # W_psi1 does not exist
             W_psi.append(self._rand(self.w_psi[l], self.w_psi[l-1]))
-        for l in range(1, self.L_psi + 1):
+        for l in range(1, self.M + 1):
             V_psi.append(self._rand(self.w_psi[l], self.p))
-            b_psi.append(self._rand(self.w_psi[l], 1))
+            omega_psi.append(self._rand(self.w_psi[l], 1))
         
         indices = [0]
         for list_ in [W_psi, V_psi]:
             indices.append(indices[-1] + len(list_))
         self.indices = Indices(*indices)
                 
-        return W_psi + V_psi + b_psi
+        return W_psi + V_psi + omega_psi
     
     def _rand(self, first_dim, second_dim) -> np.ndarray:
         return np.random.rand(first_dim, second_dim) - 0.5
@@ -137,13 +137,13 @@ class PCF:
         @jax.jit
         def _psi_fcn(theta, weights):
             W_psi = weights[self.indices.W_psi:self.indices.V_psi]
-            V_psi = weights[self.indices.V_psi:self.indices.b_psi]
-            b_psi = weights[self.indices.b_psi:]
-            out = V_psi[0] @ theta.T + b_psi[0]
-            for j in range(1, self.L_psi):
+            V_psi = weights[self.indices.V_psi:self.indices.omega_psi]
+            omega_psi = weights[self.indices.omega_psi:]
+            out = V_psi[0] @ theta.T + omega_psi[0]
+            for j in range(1, self.M):
                 jW = j - 1  # because W_psi1 does not exist
                 out = self.act_psi_jax(out)
-                out = W_psi[jW] @ out + V_psi[j] @ theta.T + b_psi[j]
+                out = W_psi[jW] @ out + V_psi[j] @ theta.T + omega_psi[j]
             W, V, omega = [], [], []
             for s in self.section_W:
                 W.append(_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
@@ -228,7 +228,7 @@ class PCF:
             self.w_psi = [self.p, w_inner, w_inner, self.m]
         else:
             self.w_psi = [self.p] + self.widths_psi + [self.m]
-        self.L_psi = len(self.w_psi[1:])
+        self.M = len(self.w_psi[1:])
 
         self._setup_model(seeds[0], warm_start)
         self.model.optimization(adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
@@ -285,13 +285,13 @@ class PCF:
         @jax.jit
         def psi(theta):
             W_psi = self.model.params[self.indices.W_psi:self.indices.V_psi]
-            V_psi = self.model.params[self.indices.V_psi:self.indices.b_psi]
-            b_psi = self.model.params[self.indices.b_psi:]
-            out = V_psi[0] @ theta + b_psi[0]
-            for j in range(1, self.L_psi):
+            V_psi = self.model.params[self.indices.V_psi:self.indices.omega_psi]
+            omega_psi = self.model.params[self.indices.omega_psi:]
+            out = V_psi[0] @ theta + omega_psi[0]
+            for j in range(1, self.M):
                 jW = j - 1  # because W_psi1 does not exist
                 out = self.act_psi_jax(out)
-                out = W_psi[jW] @ out + V_psi[j] @ theta + b_psi[j]
+                out = W_psi[jW] @ out + V_psi[j] @ theta + omega_psi[j]
             return out.squeeze()
         
         return psi
