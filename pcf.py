@@ -100,9 +100,7 @@ class PCF:
         return ACTIVATIONS[activation.lower()][interface]
     
     def _init_weights(self, seed=0, warm_start=False) -> List[np.ndarray]:
-        if warm_start:
-            if self.cache is None:
-                raise ValueError('Trying to warm start before first training.')
+        if warm_start and self.cache is not None:
             return self.cache
         return self._rand_weights(seed)
         
@@ -172,7 +170,7 @@ class PCF:
 
     def fit(self, Y, X, Theta, rho_th=1.e-8, tau_th=0., zero_coeff=1.e-4,
             seeds=None, cores=4, adam_epochs=200, lbfgs_epochs=2000,
-            tune=False, n_folds=5, warm_start=False) -> Dict[str, float]:
+            tune=False, n_folds=5, warm_start=True) -> Dict[str, float]:
         
         if Y.ndim == 1:
             # single output
