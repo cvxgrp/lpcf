@@ -59,11 +59,11 @@ umax = np.array([312.15]) # [K]
 # range where initial states are generated
 Tc_min = 273.15+5. # [K] 
 Tc_max = 273.15+50. # [K]
-CA_min = 6.5 # [kmol/m^3]
-CA_max = 9.0 # [kmol/m^3]
+CA_min = 2.0 # [kmol/m^3]
+CA_max = 8.5 # [kmol/m^3]
 
-CA_ref_min=7.0 # [kmol/m^3] CA setpoint range
-CA_ref_max=8.0 # [kmol/m^3]
+CA_ref_min=2.0 # [kmol/m^3] CA setpoint range
+CA_ref_max=8.5 # [kmol/m^3]
 
 Ts = 0.5 # [hr] sampling time
 
@@ -211,7 +211,7 @@ if GenerateData:
         Xopt = simulation(x0,Uopt)
         loss = opt_control_loss(Uopt, x0, x_ref, Tj_ref) # total loss
         loss = loss.item()
-        failed = np.isnan(loss) or loss>200. # discard NaNs and outliers
+        failed = np.isnan(loss) or loss>2000. # discard NaNs and outliers
 
         loss_k = list()
         loss = 0.
@@ -422,7 +422,7 @@ else:
 
         ax[1,h].plot(unscale_T(np.vstack(U1)),label='ADP')
         ax[1,h].plot(unscale_T(np.vstack(U2)),label='Optimal')
-        ax[1,h].plot(np.ones(H)*unscale_T(Tj_ref),label='Reference')
+        #ax[1,h].plot(np.ones(H)*unscale_T(Tj_ref),label='Reference')
         ax[1,h].plot(np.ones(H)*unscale_T(umin), 'k--')
         ax[1,h].plot(np.ones(H)*unscale_T(umax), 'k--')
         ax[1,h].set_title("Jacket Temperature [K]", fontsize=12)
