@@ -69,7 +69,7 @@ class Section:
 class PCF:
 
     def __init__(self, widths=None, widths_psi=None,
-                 activation='relu', activation_psi=None) -> None:
+                 activation='relu', activation_psi=None, nonneg=False) -> None:
         
         # initialize structure, None values inferred later via data dimenions
         
@@ -95,6 +95,8 @@ class PCF:
         self.model = None
         self.indices = None
         self.cache = None
+        
+        self.nonneg = nonneg
         
     def _get_act(self, activation, interface) -> Callable:
         return ACTIVATIONS[activation.lower()][interface]
@@ -163,6 +165,8 @@ class PCF:
                 jW = j - 1  # because W1 does not exist
                 y = self.act_jax(y)
                 y = map_matmul(W[jW], y) + map_matmul(V[j], x) + omega[j]
+            if self.nonneg:
+                y = jnp.maximum(y, 0.)
             return y
         
         self.model = StaticModel(self.d, self.n + self.p, _fcn)
@@ -326,6 +330,8 @@ class PCF:
             jW = j - 1  # because W1 does not exist
             y = self.act_cvxpy(y)
             y = W[jW] @ y + V[j] @ x + omega[j]
+        if self.nonneg:
+            y = cp.maximum(y, 0.)
         return y
 
     def tojax(self) -> Tuple[Callable, List[np.ndarray]]:
