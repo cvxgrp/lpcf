@@ -23,22 +23,22 @@ plt.rcParams['text.usetex'] = True
 plt.rcParams['font.family'] = 'serif'
 #plt.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}'
 
-GenerateData=0
-TrainModel=0
+GenerateData=1
+TrainModel=1
 
-widths=[10,5]
+widths=[10,2]
 widths_psi=[10,10]
 rho_th = 1.e-8
 tau_th = 0.e-5
 n_seeds=10
-adam_epochs=1000
+adam_epochs=200
 lbfgs_epochs=2000
 
 # Generate optimal control data from random initial states
-M = 500 # number of initial states
-H = 100 # finite-time optimal control horizon
-H1 = H-1 # number of states along optimal trajectory included in the training dataset (number of samples N ~= H1*M, H1<=H-1)
-Qu=0.1 # weight on deviations of inputs from steady state
+M = 100 # number of initial states
+H = 200 # finite-time optimal control horizon
+H1 = 20-1 # number of states along optimal trajectory included in the training dataset (number of samples N ~= (H1+1)*M, H1<=H-1)
+Qu=0.01 # weight on deviations of inputs from steady state
 gamma = 1.0 # discount factor
 
 # Define model constants [1]
@@ -58,11 +58,11 @@ umin = np.array([285.15]) # [K]
 umax = np.array([312.15]) # [K]
 # range where initial states are generated
 Tc_min = 273.15+5. # [K] 
-Tc_max = 273.15+50. # [K]
-CA_min = 2.0 # [kmol/m^3]
-CA_max = 8.5 # [kmol/m^3]
+Tc_max = 273.15+60. # [K]
+CA_min = 7.0 # [kmol/m^3]
+CA_max = 9.0 # [kmol/m^3]
 
-CA_ref_min=2.0 # [kmol/m^3] CA setpoint range
+CA_ref_min=7.5 # [kmol/m^3] CA setpoint range
 CA_ref_max=8.5 # [kmol/m^3]
 
 Ts = 0.5 # [hr] sampling time
@@ -95,7 +95,7 @@ CA_ref_max = scale_CA(CA_ref_max)
 
 @jax.jit
 def stage_cost_x(x,x_ref):
-    loss = jnp.sum((x-x_ref)**2) # cost computed on scaled variables
+    loss = jnp.sum((x[1]-x_ref[1])**2) # cost computed on scaled variables
     return loss
 
 @jax.jit
@@ -104,7 +104,7 @@ def stage_cost_u(u,Tj_ref):
     return loss
 
 def stage_cost_x_cvx(x,x_ref):
-    loss = cp.sum_squares(x-x_ref) # cost computed on scaled variables
+    loss = cp.sum_squares(x[1]-x_ref[1]) # cost computed on scaled variables
     return loss
 
 def stage_cost_u_cvx(u, Tj_ref):
@@ -198,8 +198,11 @@ if GenerateData:
 
         CA_ref = (CA_ref_max-CA_ref_min)*np.random.rand(1)+CA_ref_min # random reference signal
         x_ref, Tj_ref = steady_state(CA_ref)
+
+        #CA_0 = (CA_ref_max-CA_ref_min)*np.random.rand(1)+CA_ref_min # random reference signal
+        #x0, _ = steady_state(CA_0)
         
-        #x0 = xss + np.array([np.random.rand()-5., 0.1*np.random.randn()]) # perturb the initial steady state
+        #x0 = x_ref + np.array([np.random.rand()-5., 0.1*np.random.randn()]) # perturb the initial steady state
         xmin = scale_x(np.array([Tc_min, CA_min]))
         xmax = scale_x(np.array([Tc_max, CA_max]))
         x0 = jnp.array([(xmax[0]-xmin[0])*np.random.rand()+xmin[0], (xmax[1]-xmin[1])*np.random.rand()+xmin[1]]) # random initial state
@@ -211,7 +214,7 @@ if GenerateData:
         Xopt = simulation(x0,Uopt)
         loss = opt_control_loss(Uopt, x0, x_ref, Tj_ref) # total loss
         loss = loss.item()
-        failed = np.isnan(loss) or loss>2000. # discard NaNs and outliers
+        failed = np.isnan(loss) # or np.linalg.norm(Xopt[-1]-x_ref)>1.e-4 #loss>10. # discard NaNs and outliers
 
         loss_k = list()
         loss = 0.
@@ -363,11 +366,11 @@ else:
 
     for h in range(Nval):
         if h==0:
-            CA_init = np.array(CA_ref_max)
-            CA_ref = np.array(CA_ref_min)
+            CA_init = np.array(scale_CA(8.4))
+            CA_ref = np.array(scale_CA(7.5))
         else:
-            CA_init = np.array(CA_ref_min)
-            CA_ref = np.array(CA_ref_max)
+            CA_init = np.array(scale_CA(7.5))
+            CA_ref = np.array(scale_CA(8.4))
 
         x0, u0  = steady_state(CA_init)
         x_ref, Tj_ref = steady_state(CA_ref)
@@ -385,7 +388,8 @@ else:
 
         Uopt=jnp.tile(Tj_ref,(H,1))
 
-        for k in range(H):
+        H2=50
+        for k in range(H2):
             # ADP solution
             fx,gx = control_affine_dynamics(xk1.reshape(nx,1))
             f0_cvx.value = np.array(fx).reshape(nx,1)
@@ -415,7 +419,7 @@ else:
 
         ax[0,h].plot(unscale_CA(np.vstack(X1)[:,1]),label='ADP')
         ax[0,h].plot(unscale_CA(np.vstack(X2)[:,1]),label='Optimal')
-        ax[0,h].plot(np.ones(H)*unscale_CA(CA_ref),label='Reference')
+        ax[0,h].plot(np.ones(H2)*unscale_CA(CA_ref),label='Reference')
         ax[0,h].set_title("Concentration [kmol/m$^3$]", fontsize=12)
         ax[0,h].legend()
         ax[0,h].grid()
@@ -423,8 +427,8 @@ else:
         ax[1,h].plot(unscale_T(np.vstack(U1)),label='ADP')
         ax[1,h].plot(unscale_T(np.vstack(U2)),label='Optimal')
         #ax[1,h].plot(np.ones(H)*unscale_T(Tj_ref),label='Reference')
-        ax[1,h].plot(np.ones(H)*unscale_T(umin), 'k--')
-        ax[1,h].plot(np.ones(H)*unscale_T(umax), 'k--')
+        ax[1,h].plot(np.ones(H2)*unscale_T(umin), 'k--')
+        ax[1,h].plot(np.ones(H2)*unscale_T(umax), 'k--')
         ax[1,h].set_title("Jacket Temperature [K]", fontsize=12)
         ax[1,h].legend()
         ax[1,h].grid()
