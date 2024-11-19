@@ -320,8 +320,29 @@ cvx_loss = gamma*(Foff+Fmax*pcf.tocvxpy(x1_cvx-x_ref_cvx,cp.vstack((x_ref_cvx,Tj
 constr = [umin <= u_cvx, u_cvx <= umax]
 cvx_prob = cp.Problem(cp.Minimize(cvx_loss), constr) 
 
+if 0:
+    # Check argmin of the surrogate model
+    dx = cp.Variable((nx,1))
+    f_free = pcf.tocvxpy(dx,cp.vstack((x_ref_cvx,Tj_ref_cvx)))
+    cvx_prob = cp.Problem(cp.Minimize(f_free))
+    CAk = list()
+    dxk = list()
+    fk = list()
+    Fmax = np.max(F)
+    for ind in range(NEXP):
+        x_ref = X_REF[ind]
+        Tj_ref = TJ_REF[ind]
+        x_ref_cvx.value = x_ref.reshape(nx,1)
+        Tj_ref_cvx.value = Tj_ref.reshape(1,1)
+        cvx_prob.solve()
+        dxk.append(np.linalg.norm(dx.value))
+        CAk.append(unscale_CA(x_ref[1].item()))
+        fk.append(f_free.value.item())
+        print(f"CA = {unscale_CA(x_ref[1].item()): 5.4f}, dx = {dxk[-1]: 5.4f}, f = {fk[-1]: 5.4f}")
+    print(f"max(||dx||) = {np.max(np.abs(dxk)): 5.4f}, max(|f|) = {np.max(np.abs(fk)): 5.4f},  Fmax = {Fmax: 5.4f}")
 seed = 0
 np.random.seed(seed)
+
 
 # ###################################
 # Closed-loop simulations for testing the ADP controller
