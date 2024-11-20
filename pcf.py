@@ -97,6 +97,7 @@ class PCF:
         self.cache = None
         
         self.nonneg = nonneg
+        self.force_argmin = False
         
     def _get_act(self, activation, interface) -> Callable:
         return ACTIVATIONS[activation.lower()][interface]
@@ -241,6 +242,13 @@ class PCF:
         def output_loss(Yhat, Y):
             return jnp.sum((Yhat - Y)**2) / Y.shape[0]
         
+        if self.force_argmin:
+            @jax.jit
+            def zero_grad_loss(params):
+                return self.pcf_zero_grad_loss(params, Theta.reshape(self.N, self.p))
+        else:
+            zero_grad_loss = None
+            
         XTheta = np.hstack((X.reshape(self.N, self.n), Theta.reshape(self.N, self.p)))
         
         t = time.time()
@@ -259,7 +267,9 @@ class PCF:
                     score += self._compute_r2(Y_val, self.model.predict(XTheta_val.reshape(-1, self.n + self.p)))
                 cv_scores[i] = score
             tau_th = tau_th_candidates[np.argmax(cv_scores)]
-        self.model.loss(rho_th=rho_th, tau_th=tau_th, output_loss=output_loss, zero_coeff=zero_coeff)
+        
+        self.model.loss(rho_th=rho_th, tau_th=tau_th, output_loss=output_loss, zero_coeff=zero_coeff, custom_regularization=zero_grad_loss)
+        
         self._fit_data(Y, XTheta, seeds, cores, warm_start)
         t = time.time() - t
 
@@ -342,3 +352,34 @@ class PCF:
             xtheta = jnp.hstack((x, theta))
             return self.model.output_fcn(xtheta, self.model.params)
         return fcn_jax
+
+    def argmin(self, fun=None, penalty=1.e4):
+        #! TODO: make custom regularization with samples of gradients
+        
+        self.force_argmin = True
+        
+        if fun is None:
+            @jax.jit
+            def g(theta):
+                return jnp.zeros(self.n)
+        else:
+            g = fun
+        
+        @jax.jit
+        def pcf_model(x, theta, params):
+            # Evaluate model output at x, theta
+            y = self.model.output_fcn(jnp.hstack((x,theta)).reshape(1,self.n+self.p), params)[0][0]
+            return y #penalty * jnp.sum(dY**2)            
+        
+        pcf_model_grad = jax.jit(jax.grad(pcf_model, argnums=0))
+        @jax.jit
+        def pcf_model_grad_g(theta,params):
+            return pcf_model_grad(g(theta), theta, params)
+        
+        pcf_model_grad_g_vec = jax.vmap(pcf_model_grad_g, in_axes=(0,None))
+
+        def pcf_zero_grad_loss(params, Theta):
+            return penalty*jnp.sum(pcf_model_grad_g_vec(Theta, params)**2)/Theta.shape[0]
+        
+        self.pcf_zero_grad_loss = pcf_zero_grad_loss
+        

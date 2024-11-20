@@ -23,8 +23,8 @@ plt.rcParams['text.usetex'] = True
 plt.rcParams['font.family'] = 'serif'
 #plt.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}'
 
-GenerateData=1
-TrainModel=1
+GenerateData=0
+TrainModel=0
 
 widths=[10,2]
 widths_psi=[10,10]
@@ -274,6 +274,8 @@ Fmax=1.
 F = F/Fmax + Foff # normalize and shift function values (all values of F are nonnegative)
 
 if TrainModel:
+    pcf.argmin(fun=None, penalty=1.e4)
+
     stats = pcf.fit(F, X, Theta, rho_th=rho_th, tau_th = tau_th, seeds=np.arange(n_seeds), cores=10, adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
 
     data = {"X": X, "Theta": Theta, "F": F, "Fmax": Fmax, "Foff": Foff, "stats": stats, "params": pcf.model.params}
@@ -343,7 +345,6 @@ if 0:
 seed = 0
 np.random.seed(seed)
 
-
 # ###################################
 # Closed-loop simulations for testing the ADP controller
 if 0:
@@ -387,11 +388,11 @@ else:
 
     for h in range(Nval):
         if h==0:
-            CA_init = np.array(scale_CA(8.4))
+            CA_init = np.array(scale_CA(8.5))
             CA_ref = np.array(scale_CA(7.5))
         else:
             CA_init = np.array(scale_CA(7.5))
-            CA_ref = np.array(scale_CA(8.4))
+            CA_ref = np.array(scale_CA(8.5))
 
         x0, u0  = steady_state(CA_init)
         x_ref, Tj_ref = steady_state(CA_ref)
