@@ -354,8 +354,7 @@ class PCF:
         return fcn_jax
 
     def argmin(self, fun=None, penalty=1.e4):
-        #! TODO: make custom regularization with samples of gradients
-        
+
         self.force_argmin = True
         
         if fun is None:
