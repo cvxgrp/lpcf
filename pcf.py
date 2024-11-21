@@ -162,13 +162,9 @@ class PCF:
                     c = 1. if self.is_increasing else -1.
                     V.append(c*_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
 
-            k=0
             for s in self.section_omega:
-                k += 1
-                if not self.is_monotonic or k == self.L:
-                    omega.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
-                else:
-                    omega.append(_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
+                omega.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
+
             return W, V, omega
 
         @jax.jit
@@ -363,13 +359,9 @@ class PCF:
             else:
                 c = 1. if self.is_increasing else -1.
                 V.append(c*_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape, order='C')))   
-        k = 0
+
         for s in self.section_omega:
-            k += 1
-            if not self.is_monotonic or k == self.L:
-                omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
-            else:
-                omega.append(_make_positive(WVomega_flat[s.start:s.end].reshape((-1, 1))))
+            omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
 
         # Evaluate convex objective function(s)
         y = V[0] @ x + omega[0]
