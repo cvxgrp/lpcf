@@ -97,7 +97,12 @@ class PCF:
         self.cache = None
         
         self.nonneg = nonneg
+
         self.force_argmin = False
+        self.is_increasing=False
+        self.is_decreasing=False
+        self.is_monotonic=False
+        
         
     def _get_act(self, activation, interface) -> Callable:
         return ACTIVATIONS[activation.lower()][interface]
@@ -151,9 +156,19 @@ class PCF:
             for s in self.section_W:
                 W.append(_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
             for s in self.section_V:
-                V.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
+                if not self.is_monotonic:
+                    V.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
+                else:
+                    c = 1. if self.is_increasing else -1.
+                    V.append(c*_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
+
+            k=0
             for s in self.section_omega:
-                omega.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
+                k += 1
+                if not self.is_monotonic or k == self.L:
+                    omega.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
+                else:
+                    omega.append(_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
             return W, V, omega
 
         @jax.jit
@@ -249,6 +264,11 @@ class PCF:
         else:
             zero_grad_loss = None
             
+        if self.is_monotonic:
+            if self.theta_min is None:
+                self.theta_min = np.min(Theta, axis=0) # infer theta_min from data
+            Theta = Theta - self.theta_min # make sure theta is nonnegative
+                
         XTheta = np.hstack((X.reshape(self.N, self.n), Theta.reshape(self.N, self.p)))
         
         t = time.time()
@@ -273,6 +293,14 @@ class PCF:
         self._fit_data(Y, XTheta, seeds, cores, warm_start)
         t = time.time() - t
 
+        if self.is_monotonic:
+            # Adjusts biases in Psi function to account for theta_min: 
+            #       z(i+1) = W_psi[i]z(i) + V_psi[i] @ (theta-theta_min) + omega_psi[i] 
+            #              = W_psi[i]z(i) + V_psi[i] @ theta + omega_psi[i] - V_psi[i]@theta_min
+            V_psi = self.model.params[self.indices.V_psi:self.indices.omega_psi]
+            for l in range(self.M):
+                self.model.params[self.indices.omega_psi+l] -= (V_psi[l] @ self.theta_min).reshape(-1, 1)
+                
         Yhat = self.model.predict(XTheta)
         R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
         
@@ -330,9 +358,18 @@ class PCF:
         for s in self.section_W:
             W.append(_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape, order='C')))  # enforce W weights to be nonnegative
         for s in self.section_V:
-            V.append(WVomega_flat[s.start:s.end].reshape(s.shape, order='C'))
+            if not self.is_monotonic:
+                V.append(WVomega_flat[s.start:s.end].reshape(s.shape, order='C'))
+            else:
+                c = 1. if self.is_increasing else -1.
+                V.append(c*_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape, order='C')))   
+        k = 0
         for s in self.section_omega:
-            omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
+            k += 1
+            if not self.is_monotonic or k == self.L:
+                omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
+            else:
+                omega.append(_make_positive(WVomega_flat[s.start:s.end].reshape((-1, 1))))
 
         # Evaluate convex objective function(s)
         y = V[0] @ x + omega[0]
@@ -381,4 +418,16 @@ class PCF:
             return penalty*jnp.sum(pcf_model_grad_g_vec(Theta, params)**2)/Theta.shape[0]
         
         self.pcf_zero_grad_loss = pcf_zero_grad_loss
+        
+    def increasing(self, theta_min=None):
+        self.is_increasing=True
+        self.is_decreasing=False
+        self.is_monotonic=True
+        self.theta_min=theta_min
+        
+    def decreasing(self, theta_min=None):
+        self.is_increasing=False
+        self.is_decreasing=True
+        self.is_monotonic=True
+        self.theta_min=theta_min
         
