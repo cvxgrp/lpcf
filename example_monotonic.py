@@ -30,9 +30,9 @@ Y = f_true_vec(X,Theta)
 
 # fit
 pcf = PCF(activation='logistic', widths=[5,5], widths_psi=[10,10])
-if 1:
+if 0:
     pcf.increasing()
-elif 0:
+elif 1:
     pcf.decreasing()
     
 stats = pcf.fit(Y, X, Theta, cores=10)

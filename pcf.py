@@ -102,8 +102,7 @@ class PCF:
         self.is_increasing=False
         self.is_decreasing=False
         self.is_monotonic=False
-        
-        
+                
     def _get_act(self, activation, interface) -> Callable:
         return ACTIVATIONS[activation.lower()][interface]
     
@@ -259,12 +258,7 @@ class PCF:
                 return self.pcf_zero_grad_loss(params, Theta.reshape(self.N, self.p))
         else:
             zero_grad_loss = None
-            
-        if self.is_monotonic:
-            if self.theta_min is None:
-                self.theta_min = np.min(Theta, axis=0) # infer theta_min from data
-            Theta = Theta - self.theta_min # make sure theta is nonnegative
-                
+                            
         XTheta = np.hstack((X.reshape(self.N, self.n), Theta.reshape(self.N, self.p)))
         
         t = time.time()
@@ -288,14 +282,6 @@ class PCF:
         
         self._fit_data(Y, XTheta, seeds, cores, warm_start)
         t = time.time() - t
-
-        if self.is_monotonic:
-            # Adjusts biases in Psi function to account for theta_min: 
-            #       z(i+1) = W_psi[i]z(i) + V_psi[i] @ (theta-theta_min) + omega_psi[i] 
-            #              = W_psi[i]z(i) + V_psi[i] @ theta + omega_psi[i] - V_psi[i]@theta_min
-            V_psi = self.model.params[self.indices.V_psi:self.indices.omega_psi]
-            for l in range(self.M):
-                self.model.params[self.indices.omega_psi+l] -= (V_psi[l] @ self.theta_min).reshape(-1, 1)
                 
         Yhat = self.model.predict(XTheta)
         R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
@@ -411,15 +397,13 @@ class PCF:
         
         self.pcf_zero_grad_loss = pcf_zero_grad_loss
         
-    def increasing(self, theta_min=None):
+    def increasing(self):
         self.is_increasing=True
         self.is_decreasing=False
         self.is_monotonic=True
-        self.theta_min=theta_min
         
-    def decreasing(self, theta_min=None):
+    def decreasing(self):
         self.is_increasing=False
         self.is_decreasing=True
         self.is_monotonic=True
-        self.theta_min=theta_min
         
