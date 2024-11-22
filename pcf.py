@@ -101,19 +101,15 @@ class PCF:
 
         self.force_argmin = False
         
-        self.is_increasing=increasing
-        self.is_decreasing=decreasing
-        self.is_monotonic=increasing or decreasing
-        
         if increasing and decreasing:
             warnings.warn("\033[1mFunction enforced to be both increasing and decreasing.\033[0m")
-            self.monotonicity_sign = 0.            
-        elif increasing and not decreasing:
-            self.monotonicity_sign = 1.
-        elif decreasing and not increasing:
-            self.monotonicity_sign = -1.    
+            self.monotonicity = 0.            
+        elif increasing:
+            self.monotonicity = 1.
+        elif decreasing:
+            self.monotonicity = -1.
         else:
-            self.monotonicity_sign = None # not used
+            self.monotonicity = None
                 
     def _get_act(self, activation, interface) -> Callable:
         return ACTIVATIONS[activation.lower()][interface]
@@ -167,10 +163,8 @@ class PCF:
             for s in self.section_W:
                 W.append(_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
             for s in self.section_V:
-                if not self.is_monotonic:
-                    V.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
-                else:
-                    V.append(self.monotonicity_sign*_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
+                Vl = out[s.start:s.end].T.reshape((-1, *s.shape))
+                V.append(Vl if self.monotonicity is None else self.monotonicity*_make_positive(Vl))
 
             for s in self.section_omega:
                 omega.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
@@ -351,10 +345,8 @@ class PCF:
         for s in self.section_W:
             W.append(_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape, order='C')))  # enforce W weights to be nonnegative
         for s in self.section_V:
-            if not self.is_monotonic:
-                V.append(WVomega_flat[s.start:s.end].reshape(s.shape, order='C'))
-            else:
-                V.append(self.monotonicity_sign*_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape, order='C')))   
+            Vl = WVomega_flat[s.start:s.end].reshape(s.shape, order='C')
+            V.append(Vl if self.monotonicity is None else self.monotonicity*_make_positive(Vl))
 
         for s in self.section_omega:
             omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
