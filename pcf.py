@@ -14,6 +14,7 @@ from jax_sysid.utils import compute_scores
 import jax.numpy as jnp
 import jax
 from dataclasses import dataclass
+import warnings
 
 jax.config.update('jax_platform_name', 'cpu')
 if not jax.config.jax_enable_x64:
@@ -69,7 +70,7 @@ class Section:
 class PCF:
 
     def __init__(self, widths=None, widths_psi=None,
-                 activation='relu', activation_psi=None, nonneg=False) -> None:
+                 activation='relu', activation_psi=None, nonneg=False, increasing=False, decreasing=False) -> None:
         
         # initialize structure, None values inferred later via data dimenions
         
@@ -99,9 +100,20 @@ class PCF:
         self.nonneg = nonneg
 
         self.force_argmin = False
-        self.is_increasing=False
-        self.is_decreasing=False
-        self.is_monotonic=False
+        
+        self.is_increasing=increasing
+        self.is_decreasing=decreasing
+        self.is_monotonic=increasing or decreasing
+        
+        if increasing and decreasing:
+            warnings.warn("\033[1mFunction enforced to be both increasing and decreasing.\033[0m")
+            self.monotonicity_sign = 0.            
+        elif increasing and not decreasing:
+            self.monotonicity_sign = 1.
+        elif decreasing and not increasing:
+            self.monotonicity_sign = -1.    
+        else:
+            self.monotonicity_sign = None # not used
                 
     def _get_act(self, activation, interface) -> Callable:
         return ACTIVATIONS[activation.lower()][interface]
@@ -158,8 +170,7 @@ class PCF:
                 if not self.is_monotonic:
                     V.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
                 else:
-                    c = 1. if self.is_increasing else -1.
-                    V.append(c*_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
+                    V.append(self.monotonicity_sign*_make_positive(out[s.start:s.end].T.reshape((-1, *s.shape))))
 
             for s in self.section_omega:
                 omega.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
@@ -343,8 +354,7 @@ class PCF:
             if not self.is_monotonic:
                 V.append(WVomega_flat[s.start:s.end].reshape(s.shape, order='C'))
             else:
-                c = 1. if self.is_increasing else -1.
-                V.append(c*_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape, order='C')))   
+                V.append(self.monotonicity_sign*_make_positive(WVomega_flat[s.start:s.end].reshape(s.shape, order='C')))   
 
         for s in self.section_omega:
             omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
@@ -396,14 +406,4 @@ class PCF:
             return penalty*jnp.sum(pcf_model_grad_g_vec(Theta, params)**2)/Theta.shape[0]
         
         self.pcf_zero_grad_loss = pcf_zero_grad_loss
-        
-    def increasing(self):
-        self.is_increasing=True
-        self.is_decreasing=False
-        self.is_monotonic=True
-        
-    def decreasing(self):
-        self.is_increasing=False
-        self.is_decreasing=True
-        self.is_monotonic=True
         

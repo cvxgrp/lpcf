@@ -29,11 +29,9 @@ Theta = Theta.flatten()[:,None]
 Y = f_true_vec(X,Theta)
 
 # fit
-pcf = PCF(activation='logistic', widths=[5,5], widths_psi=[10,10])
-if 0:
-    pcf.increasing()
-elif 1:
-    pcf.decreasing()
+increasing=True
+decreasing=False
+pcf = PCF(activation='logistic', widths=[5,5], widths_psi=[10,10], increasing=increasing, decreasing=decreasing)
     
 stats = pcf.fit(Y, X, Theta, cores=10)
 
