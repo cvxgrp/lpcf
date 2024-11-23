@@ -70,7 +70,8 @@ class Section:
 class PCF:
 
     def __init__(self, widths=None, widths_psi=None,
-                 activation='relu', activation_psi=None, nonneg=False, increasing=False, decreasing=False) -> None:
+                 activation='relu', activation_psi=None, nonneg=False, increasing=False, decreasing=False,
+                 classification=False) -> None:
         
         # initialize structure, None values inferred later via data dimenions
         
@@ -110,6 +111,8 @@ class PCF:
             self.monotonicity = -1.
         else:
             self.monotonicity = None
+            
+        self.classification = classification
                 
     def _get_act(self, activation, interface) -> Callable:
         return ACTIVATIONS[activation.lower()][interface]
@@ -253,10 +256,18 @@ class PCF:
         self._setup_model(seeds[0], warm_start)
         self.model.optimization(adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
 
-        @jax.jit
-        def output_loss(Yhat, Y):
-            return jnp.sum((Yhat - Y)**2) / Y.shape[0]
-        
+        if not self.classification:
+            @jax.jit
+            def output_loss(Yhat, Y):
+                return jnp.sum((Yhat - Y)**2) / Y.shape[0]
+        else:
+            labels = np.unique(Y)
+            if not list(labels)==[-1,1]:
+                raise Exception("Target data must only contain values -1 (feasible) and 1 (infeasible)")
+            @jax.jit
+            def output_loss(Yhat, Y):
+                return jnp.sum(jnp.logaddexp(0.,-Y*Yhat)) / Y.shape[0]
+            
         if self.force_argmin:
             @jax.jit
             def zero_grad_loss(params):
@@ -289,11 +300,15 @@ class PCF:
         t = time.time() - t
                 
         Yhat = self.model.predict(XTheta)
-        R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
-        
+        if not self.classification:
+            R2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
+            ACC = None
+        else:
+            ACC, _, msg = compute_scores(Y==-1, Yhat<=0, None, None, fit='Accuracy')
+            R2 = None
         self.cache = self.model.params
 
-        return {'time': t, 'R2': R2, 'msg': msg, 'lambda': tau_th}
+        return {'time': t, 'R2': R2, 'Accuracy': ACC, 'msg': msg, 'lambda': tau_th}
     
     def _fit_data(self, Y, XTheta, seeds, cores, warm_start=False) -> None:
         if len(seeds) > 1:
@@ -369,6 +384,10 @@ class PCF:
             xtheta = jnp.hstack((x, theta))
             return self.model.output_fcn(xtheta, self.model.params)
         return fcn_jax
+    
+    def predict(self, X, Theta):
+        return self.model.predict(jnp.hstack((X.reshape(-1,self.n),Theta.reshape(-1,self.p)))).reshape(-1)
+
 
     def argmin(self, fun=None, penalty=1.e4):
 
