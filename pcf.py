@@ -69,8 +69,8 @@ class Section:
 
 class PCF:
 
-    def __init__(self, widths=None, widths_psi=None,
-                 activation='relu', activation_psi=None, nonneg=False, increasing=False, decreasing=False,
+    def __init__(self, widths=None, widths_psi=None, activation='relu', activation_psi=None,
+                 nonneg=False, increasing=False, decreasing=False, quadratic=False,
                  classification=False) -> None:
         
         # initialize structure, None values inferred later via data dimenions
@@ -112,6 +112,7 @@ class PCF:
         else:
             self.monotonicity = None
             
+        self.quadratic = quadratic
         self.classification = classification
                 
     def _get_act(self, activation, interface) -> Callable:
@@ -171,19 +172,30 @@ class PCF:
 
             for s in self.section_omega:
                 omega.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
+                
+            if self.quadratic:
+                triu_indices = np.triu_indices(self.n)
+                def reshape_chol(c):
+                    res = jnp.zeros((self.n, self.n))
+                    return res.at[triu_indices].set(c)
+                chol = jax.vmap(reshape_chol)(out[self.section_omega[-1].end:].T)
+            else:
+                chol = None
 
-            return W, V, omega
+            return W, V, omega, chol
 
         @jax.jit
         def _fcn(xtheta, weights):
             x = xtheta[:, :self.n]
             theta = xtheta[:, self.n:]
-            W, V, omega = _psi_fcn(theta, weights)
+            W, V, omega, chol = _psi_fcn(theta, weights)
             y = map_matmul(V[0], x) + omega[0]
             for j in range(1, self.L):
                 jW = j - 1  # because W1 does not exist
                 y = self.act_jax(y)
                 y = map_matmul(W[jW], y) + map_matmul(V[j], x) + omega[j]
+            if self.quadratic:
+                y += jax.vmap(lambda x, C: jnp.sum((C @ x)**2))(x, chol).reshape(-1, 1)
             if self.nonneg:
                 y = jnp.maximum(y, 0.)
             return y
@@ -245,6 +257,10 @@ class PCF:
             self.section_omega.append(Section(offset, offset + size, (size,)))
             offset += size
         self.m = offset
+        
+        if self.quadratic:
+            self.nchol = self.n * (self.n + 1) // 2
+            self.m += self.nchol
         
         if self.widths_psi is None:
             w_inner = (self.p + self.m) // 2
@@ -372,6 +388,9 @@ class PCF:
             jW = j - 1  # because W1 does not exist
             y = self.act_cvxpy(y)
             y = W[jW] @ y + V[j] @ x + omega[j]
+        if self.quadratic:
+            chol = cp.vec_to_upper_tri(WVomega_flat[self.section_omega[-1].end:])
+            y += cp.sum_squares(chol @ x)
         if self.nonneg:
             y = cp.maximum(y, 0.)
         return y
