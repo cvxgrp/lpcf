@@ -70,7 +70,7 @@ class Section:
 class PCF:
 
     def __init__(self, widths=None, widths_psi=None, activation='relu', activation_psi=None,
-                 nonneg=False, increasing=False, decreasing=False, quadratic=False,
+                 nonneg=False, increasing=False, decreasing=False, quadratic=False, quadratic_r=None,
                  classification=False) -> None:
         
         # initialize structure, None values inferred later via data dimenions
@@ -80,7 +80,7 @@ class PCF:
         self.L, self.M = None, None
         
         self.d, self.n, self.p, self.m, self.N = None, None, None, None, None
-        self.section_W, self.section_V, self.section_omega = None, None, None
+        self.section_W, self.section_V, self.section_omega, self.section_quadratic = [], [], [], []
         
         if not ACTIVATIONS[activation]['convex_increasing']:
             raise ValueError('Activation function for variable network must'
@@ -113,6 +113,7 @@ class PCF:
             self.monotonicity = None
             
         self.quadratic = quadratic
+        self.quadratic_r = quadratic_r
         self.classification = classification
                 
     def _get_act(self, activation, interface) -> Callable:
@@ -174,28 +175,39 @@ class PCF:
                 omega.append(out[s.start:s.end].T.reshape((-1, *s.shape)))
                 
             if self.quadratic:
-                triu_indices = np.triu_indices(self.n)
-                def reshape_chol(c):
-                    res = jnp.zeros((self.n, self.n))
-                    return res.at[triu_indices].set(c)
-                chol = jax.vmap(reshape_chol)(out[self.section_omega[-1].end:].T)
+                s = self.section_quadratic[0]
+                if self.quadratic_r is None:
+                    triu_indices = np.triu_indices(self.n)
+                    def reshape_chol(c):
+                        res = jnp.zeros((self.n, self.n))
+                        return res.at[triu_indices].set(c)
+                    factor = jax.vmap(reshape_chol)(out[s.start:s.end].T)
+                    diag_sqrt = None
+                else:
+                    factor = out[s.start:s.end].T.reshape((-1, *s.shape))
+                    s = self.section_quadratic[1]
+                    diag_sqrt = out[s.start:s.end].T.reshape((-1, *s.shape))
             else:
-                chol = None
+                factor = None
+                diag_sqrt = None
 
-            return W, V, omega, chol
+            return W, V, omega, factor, diag_sqrt
 
         @jax.jit
         def _fcn(xtheta, weights):
             x = xtheta[:, :self.n]
             theta = xtheta[:, self.n:]
-            W, V, omega, chol = _psi_fcn(theta, weights)
+            W, V, omega, factor, diag_sqrt = _psi_fcn(theta, weights)
             y = map_matmul(V[0], x) + omega[0]
             for j in range(1, self.L):
                 jW = j - 1  # because W1 does not exist
                 y = self.act_jax(y)
                 y = map_matmul(W[jW], y) + map_matmul(V[j], x) + omega[j]
             if self.quadratic:
-                y += jax.vmap(lambda x, C: jnp.sum((C @ x)**2))(x, chol).reshape(-1, 1)
+                if self.quadratic_r is None:
+                    y += jax.vmap(lambda x, C: jnp.sum((C @ x)**2))(x, factor).reshape(-1, 1)
+                else:
+                    y += jax.vmap(lambda x, C, d: jnp.sum((C @ x)**2) + jnp.sum((d * x)**2))(x, factor, diag_sqrt).reshape(-1, 1)
             if self.nonneg:
                 y = jnp.maximum(y, 0.)
             return y
@@ -238,29 +250,22 @@ class PCF:
             self.w = [self.n] + self.widths + [self.d]
         self.L = len(self.w[1:])
 
-        self.section_W = []
-        self.section_V = []
-        self.section_omega = []
         offset = 0
         for l in range(2, self.L + 1):  # W_psi1 does not exist
-            shape = (self.w[l], self.w[l - 1])
-            size = np.prod(shape)
-            self.section_W.append(Section(offset, offset + size, shape))
-            offset += size
+            offset = self._append_section(self.section_W, offset, shape=(self.w[l], self.w[l - 1]))
         for l in range(1, self.L + 1):
-            shape = (self.w[l], self.n)
-            size = np.prod(shape)
-            self.section_V.append(Section(offset, offset + size, shape))
-            offset += size
+            offset = self._append_section(self.section_V, offset, shape=(self.w[l], self.n))
         for l in range(1, self.L + 1):
-            size = self.w[l]
-            self.section_omega.append(Section(offset, offset + size, (size,)))
-            offset += size
-        self.m = offset
+            offset = self._append_section(self.section_omega, offset, shape=(self.w[l],))
         
         if self.quadratic:
-            self.nchol = self.n * (self.n + 1) // 2
-            self.m += self.nchol
+            if self.quadratic_r is None:
+                offset = self._append_section(self.section_quadratic, offset, shape=(self.n, self.n), size=self.n*(self.n+1)//2)
+            else:
+                offset = self._append_section(self.section_quadratic, offset, shape=(self.quadratic_r, self.n))
+                offset = self._append_section(self.section_quadratic, offset, shape=(self.n,))
+                
+        self.m = offset
         
         if self.widths_psi is None:
             w_inner = (self.p + self.m) // 2
@@ -326,6 +331,12 @@ class PCF:
 
         return {'time': t, 'R2': R2, 'Accuracy': ACC, 'msg': msg, 'lambda': tau_th}
     
+    def _append_section(self, section, offset, shape, size=None) -> int:
+        if size is None:
+            size = np.prod(shape)
+        section.append(Section(offset, offset + size, shape))
+        return offset + size
+    
     def _fit_data(self, Y, XTheta, seeds, cores, warm_start=False) -> None:
         if len(seeds) > 1:
             init_fun = lambda seed: self._init_weights(seed, warm_start)
@@ -389,8 +400,15 @@ class PCF:
             y = self.act_cvxpy(y)
             y = W[jW] @ y + V[j] @ x + omega[j]
         if self.quadratic:
-            chol = cp.vec_to_upper_tri(WVomega_flat[self.section_omega[-1].end:])
-            y += cp.sum_squares(chol @ x)
+            s = self.section_quadratic[0]
+            if self.quadratic_r is None:
+                factor = cp.vec_to_upper_tri(WVomega_flat[s.start:s.end])
+                y += cp.sum_squares(factor @ x)
+            else:
+                factor = WVomega_flat[s.start:s.end].reshape(s.shape, order='C')
+                s = self.section_quadratic[1]
+                diag_sqrt = WVomega_flat[s.start:s.end].reshape((-1, 1))
+                y += cp.sum_squares(factor @ x) + cp.sum_squares(cp.multiply(diag_sqrt, x))
         if self.nonneg:
             y = cp.maximum(y, 0.)
         return y
