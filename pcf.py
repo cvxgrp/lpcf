@@ -311,7 +311,7 @@ class PCF:
                     Y_train, XTheta_train = np.vstack((Y[:j*f], Y[(j+1)*f:])), np.vstack((XTheta[:j*f], XTheta[(j+1)*f:]))
                     Y_val, XTheta_val = Y[j*f:(j+1)*f], XTheta[j*f:(j+1)*f]
                     self._fit_data(Y_train, XTheta_train, seeds, cores, warm_start)
-                    score += self._compute_r2(Y_val, self.model.predict(XTheta_val.reshape(-1, self.n + self.p)))
+                    score += self._compute_r2(Y_val, self.model.predict(XTheta_val.reshape(-1, self.n + self.p)))  # TODO: Do we need to switch to ACC for classification?
                 cv_scores[i] = score
             tau_th = tau_th_candidates[np.argmax(cv_scores)]
         
