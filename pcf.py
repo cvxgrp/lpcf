@@ -311,7 +311,12 @@ class PCF:
                     Y_train, XTheta_train = np.vstack((Y[:j*f], Y[(j+1)*f:])), np.vstack((XTheta[:j*f], XTheta[(j+1)*f:]))
                     Y_val, XTheta_val = Y[j*f:(j+1)*f], XTheta[j*f:(j+1)*f]
                     self._fit_data(Y_train, XTheta_train, seeds, cores, warm_start)
-                    score += self._compute_r2(Y_val, self.model.predict(XTheta_val.reshape(-1, self.n + self.p)))
+                    Yhat = self.model.predict(XTheta_val.reshape(-1, self.n + self.p))
+                    if not self.classification:
+                        s, _, _ = compute_scores(Y, Yhat, None, None, fit='R2')
+                    else:
+                        s, _, _ = compute_scores(Y==-1, Yhat<=0, None, None, fit='Accuracy')
+                    score += s
                 cv_scores[i] = score
             tau_th = tau_th_candidates[np.argmax(cv_scores)]
         
