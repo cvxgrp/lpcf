@@ -32,7 +32,7 @@ Theta = (thmax-thmin)*np.random.rand(N,1)+thmin
 Y = 1.-2.*(f_true_vec(X,Theta)<=0)
 
 # fit
-pcf = PCF(activation='logistic', widths=[20,20], widths_psi=[10], classification=True)
+pcf = PCF(activation='logistic', widths=[], widths_psi=[5], classification=True)
     
 stats = pcf.fit(Y, X, Theta, tau_th=0.e-5, zero_coeff=1.e-4, seeds=range(10), cores=10,
                 adam_epochs=100, lbfgs_epochs=2000)
