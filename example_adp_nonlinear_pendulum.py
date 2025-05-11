@@ -34,7 +34,7 @@ rho_th = 1.e-8
 tau_th = 0.e-8
 n_seeds=cpu_count() # number of random seeds for training
 adam_epochs=1000
-lbfgs_epochs=5000
+lbfgs_epochs=1000
 
 # Generate optimal control data from random initial states
 M = 1000 # number of initial states
@@ -151,8 +151,15 @@ if GenerateData:
 
         np.random.seed(seed)
 
-        # p = pmin + np.random.rand(1)*(pmax-pmin)                
-        x0 = ((xmax-xmin)*np.random.rand(nx)+xmin).reshape(nx) # random initial state
+        # p = pmin + np.random.rand(1)*(pmax-pmin)               
+        
+        # random initial state
+        if 1: # np.random.rand() < 0.5: 
+            x0 = ((xmax-xmin)*np.random.rand(nx)+xmin).reshape(nx) # full range
+        else:
+            # around the reference with small velocity
+            x0 = np.array([theta_ref+np.random.randn()*np.pi/20., np.random.randn()*.01])
+            
         log10_beta = log10_beta_min + np.random.rand()*(log10_beta_max-log10_beta_min) 
         beta = 10.**log10_beta.item() # random beta
         
@@ -265,7 +272,7 @@ pcf = PCF(activation='logistic', activation_psi='logistic', widths=widths, width
 def g(theta):
     # f should be minimized for x = g(theta)
     return jnp.array([theta_ref, 0.])
-pcf.argmin(fun=g, penalty=1.e5) # add regularization on gradient with respect to x at x=0
+pcf.argmin(fun=g, penalty=1.e2) # add regularization on gradient with respect to x at x=0
 
 if TrainModel:
     stats = pcf.fit(F_train, X_train, Theta_train, rho_th=rho_th, tau_th = tau_th, seeds=np.arange(n_seeds), cores=cpu_count(), adam_epochs=adam_epochs, lbfgs_epochs=lbfgs_epochs)
@@ -347,6 +354,10 @@ if CompareInputs:
     plt.scatter(U_train,Uhat_train, label='training data')
     plt.scatter(U_test,Uhat_test, label='test data')
     plt.plot([umin,umax], [umin,umax], 'r--')
+    xumin = np.minimum(np.min(U_train),np.min(U_test))
+    xumax = np.maximum(np.max(U_train),np.max(U_test))
+    plt.xlim(xumin,xumax)
+    plt.ylim(xumin,xumax)
     plt.xlabel('true value')
     plt.ylabel('predicted value')
     plt.grid()
