@@ -149,11 +149,11 @@ if GenerateData:
         np.random.seed(seed)
 
         # p = pmin + np.random.rand(1)*(pmax-pmin)                
-        x0 = ((xmax-xmin)*np.random.rand(2)+xmin).reshape(nx) # random initial state
+        x0 = ((xmax-xmin)*np.random.rand(nx)+xmin).reshape(nx) # random initial state
         
         theoptions=options.copy()
         solver=jaxopt.ScipyBoundedMinimize(fun=opt_control_loss, method="L-BFGS-B", options=theoptions, maxiter=options['maxfun'])
-        U_guess=.5*(umin+umax)*np.ones(H)
+        U_guess=np.tile(.5*(umin+umax), (H,1))
         Uopt, status = solver.run(U_guess, bounds = (Umin,Umax), x0=x0, p=p, beta=beta)
         loss = status.fun_val
         #print(np.hstack((np.sum(K_lqr*x0),Uopt[0])))

@@ -38,7 +38,6 @@ lbfgs_epochs=1000
 # Generate optimal control data from random initial states
 M = 100 # number of initial states
 H = 50 # finite-time optimal control horizon, large enough to approximate the infinite horizon problem
-Qu = 1. # input weight
 
 umin = -.5
 umax = .5
@@ -68,8 +67,6 @@ def stage_cost(x,u, beta):
 def stage_cost_cvx(x,u, beta):
     loss = cp.sum_squares(x) + beta*cp.sum_squares(u)
     return loss
-
-# ###################################
 
 # ###################################
 # Define dynamics
@@ -143,14 +140,14 @@ if GenerateData:
         np.random.seed(seed)
 
         # p = pmin + np.random.rand(1)*(pmax-pmin)                
-        x0 = ((xmax-xmin)*np.random.rand(2)+xmin).reshape(nx) # random initial state
+        x0 = ((xmax-xmin)*np.random.rand(nx)+xmin).reshape(nx) # random initial state
         log10_beta = log10_beta_min + np.random.rand(1)*(log10_beta_max-log10_beta_min) 
         p = p_min + np.random.rand(1)*(p_max-p_min) 
         beta = 10.**log10_beta.item() # random beta
         
         theoptions=options.copy()
         solver=jaxopt.ScipyBoundedMinimize(fun=opt_control_loss, method="L-BFGS-B", options=theoptions, maxiter=options['maxfun'])
-        U_guess=.5*(umin+umax)*np.ones(H)
+        U_guess=np.tile(.5*(umin+umax), (H,1))
         Uopt, status = solver.run(U_guess, bounds = (Umin,Umax), x0=x0, beta=beta, p=p)
         loss = status.fun_val
         #print(np.hstack((np.sum(K_lqr*x0),Uopt[0])))
@@ -193,7 +190,7 @@ F = FOPT # function values
 U = np.hstack([UOPT[:,0]]).reshape(-1,nu) # control inputs
 
 # Normalize data
-Fmax = np.max(F)
+#Fmax = np.max(F)
 #Foff = 1.0
 Foff = 0.
 Fmax=1.
@@ -299,12 +296,103 @@ for i in range(N_train):
     cvx_prob.solve()
     Uhat_train[i,:] = u_cvx.value.reshape(nu)
 
-plt.scatter(U_train,Uhat_train)
-plt.scatter(U_test,Uhat_test)
+plt.scatter(U_train,Uhat_train, label='training data')
+plt.scatter(U_test,Uhat_test, label='test data')
 plt.plot([umin,umax], [umin,umax], 'r--')
 plt.xlabel('true value')
 plt.ylabel('predicted value')
 plt.grid()
+plt.legend()
 plt.show()
 plt.title('ADP')
     
+
+
+# Generate closed-loop test data using the optimal control policy (receding horizon)
+def closed_loop_optimal(x0, N_sim, p, beta):        
+    xk = x0.copy()
+    X= [x0.reshape(nx)]
+    U= list()
+
+    Uopt=jnp.tile((umin+umax)/2.,(H,1))
+    for k in range(N_sim):
+        theoptions=options.copy()
+        solver=jaxopt.ScipyBoundedMinimize(fun=opt_control_loss, method="L-BFGS-B", options=theoptions, maxiter=options['maxfun'])
+        U_guess=np.vstack((Uopt[1:,:],Uopt[-1,:])) # shifted previous optimal sequence
+        Uopt, status = solver.run(U_guess, bounds = (Umin,Umax), x0=xk.reshape(nx), p=p, beta=beta)
+        uk = Uopt[0,:]
+        fx,gx = control_affine_dynamics(xk.reshape(nx),p)
+        xk = np.array(fx.reshape(nx,1)+gx.reshape(nx,1)@uk.reshape(1,1)).reshape(nx)
+        X.append(xk)
+        U.append(uk)
+        
+        print(f"k={k+1: 2d}"
+            f", x = [{xk[0].item(): 5.4f}, {xk[1].item(): 5.4f}], u = {uk[0].item(): 5.4f}")
+    return np.vstack(X), np.vstack(U)
+
+# # ###################################
+# # Closed-loop simulations for testing the ADP controller
+# fig,ax = plt.subplots(1,1,figsize=(6,6))
+# ax=[ax]
+
+# #p = pmin + np.random.rand(1)*(pmax-pmin)
+# N_test=10
+# for i in range(N_test):
+#     x0 = X_test[i]
+#     xk = x0.copy()
+#     X= [x0.reshape(nx)]
+#     U= list()
+
+#     Uopt=jnp.tile((umin+umax)/2.,(H,1))
+#     for k in range(H):
+#         # ADP solution
+#         x0_cvx.value = xk.reshape(nx,1)
+#         fx,gx = control_affine_dynamics(xk.reshape(nx),p)
+#         f0_cvx.value = np.array(fx).reshape(nx,1)
+#         g0_cvx.value = np.array(gx).reshape(nx,1)
+#         cvx_prob.solve()
+#         uk = u_cvx.value
+#         xk = np.array((fx.reshape(nx,1)+gx.reshape(nx,1)@uk).reshape(nx))
+#         X.append(xk)
+#         U.append(uk)
+        
+#         # Optimal control solution
+#         theoptions=options.copy()
+#         solver=jaxopt.ScipyBoundedMinimize(fun=opt_control_loss, method="L-BFGS-B", options=theoptions, maxiter=options['maxfun'])
+#         U_guess=np.vstack((Uopt[1:,:],Uopt[-1,:])) # shifted previous optimal sequence
+#         Uopt, status = solver.run(Uopt, bounds = (Umin,Umax), x0=xk.reshape(nx), p=p, beta=beta)
+#         uk = Uopt[0,:]
+#         fx,gx = control_affine_dynamics(xk.reshape(nx),p)
+#         xk = np.array(fx.reshape(nx,1)+gx.reshape(nx,1)@uk.reshape(1,1)).reshape(nx)
+#         X.append(xk)
+#         U.append(uk)
+        
+#         print(f"k={k+1: 2d}"
+#                 f", x = [{xk[0].item(): 5.4f},{xk[1].item(): 5.4f}], u = {uk[0].item(): 5.4f}")
+
+#     if i==0:
+#         ax[0].plot(np.vstack(X_test[i])[:,0],np.vstack(X_test[i])[:,1],label='ADP', linestyle='--', color='black')
+#         c1=ax[0].plot(np.vstack(X)[:,0],np.vstack(X)[:,1],label='Optimal')[0].get_color()
+#     else:
+#         ax[0].plot(np.vstack(X_test[i])[:,0],np.vstack(X_test[i])[:,1], linestyle='--', color='black')
+#         ax[0].plot(np.vstack(X)[:,0],np.vstack(X)[:,1], color=c1)
+#     if k==H-1:
+#         ax[0].scatter(x0[0],x0[1],color=c1, s=50)
+        
+
+#     # if i==0:
+#     #     ax[1].plot(np.vstack(U1),label='ADP')
+#     #     ax[1].plot(np.vstack(U2),label='Optimal')
+#     # else:
+#     #     ax[1].plot(np.vstack(U1))
+#     #     ax[1].plot(np.vstack(U2))
+#     # ax[1].plot(np.ones(H)*umin, 'k--')
+#     # ax[1].plot(np.ones(H)*umax, 'k--')
+#     # ax[1].set_title("input", fontsize=12)
+#     # ax[1].legend()
+#     # ax[1].grid()
+#     print(" ")
+
+# ax[0].set_title("states", fontsize=12)
+# ax[0].legend()
+# ax[0].grid()
