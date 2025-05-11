@@ -401,9 +401,9 @@ if CompareClosedLoop:
                   f", x = [{xk[0].item(): 5.4f}, {xk[1].item(): 5.4f}], u = {uk[0].item(): 5.4f}")
         return np.vstack(X), np.vstack(U)
     
-    i=0 # test index
-    Xn,Un = closed_loop_optimal(X_test[i], 'nonlinear', H, 10**LOG10_BETA_test[i], model_params)
-    Xa,Ua = closed_loop_optimal(X_test[i], 'adp', H, 10**LOG10_BETA_test[i], model_params)
+    x0 = np.array([0.,0.])
+    Xn,Un = closed_loop_optimal(x0, 'nonlinear', H, 10**LOG10_BETA_test[i], model_params)
+    Xa,Ua = closed_loop_optimal(x0, 'adp', H, 10**LOG10_BETA_test[i], model_params)
     
     fig,ax = plt.subplots(2,1)
     ax[0].plot(np.arange(Xn.shape[0])*Ts, Xn[:,0], label='nonlinear')
