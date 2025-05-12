@@ -18,23 +18,24 @@ from functools import partial
 plt.rcParams['text.usetex'] = True
 plt.rcParams['font.family'] = 'serif'
 #plt.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}'
-
+plt.rcParams['font.size'] = 20
 np.random.seed(1)
 
-GenerateData=1
-TrainModel=1
+GenerateData=0
+TrainModel=0
 CompareInputs=1
 CompareClosedLoop=1
+PlotValueFunction=0
 
 testset_size = .3 # fraction of data used for testing
 
 widths=[20,20]
-widths_psi=[5]
+widths_psi=[10,10]
 rho_th = 1.e-8
-tau_th = 0.e-8
+tau_th = 1.e-1
 n_seeds=cpu_count() # number of random seeds for training
 adam_epochs=1000
-lbfgs_epochs=1000
+lbfgs_epochs=5000
 
 # Generate optimal control data from random initial states
 M = 1000 # number of initial states
@@ -49,14 +50,13 @@ xmax = np.array([np.pi+np.pi/6,1.])
 
 theta_ref = np.pi # reference angle (swing pendulum up)
 
-log10_beta_min = np.log10(0.001)
-log10_beta_max = np.log10(0.01)
+mass_min = 0.5 # mass of pendulum [kg]
+mass_max = 2.0
 
 Ts = 0.02 # sampling time (s)
 nx = 2 # number of states
 nu = 1 # number of inputs
 
-m=1.0 # mass of pendulum [kg]
 L=1.0 # length of pendulum [m]
 g=9.81 # gravity [m/s^2]
 b=0.05 # damping coefficient [kg*m^2/s]
@@ -65,6 +65,7 @@ model_params = [] # placeholder for extra model parameters to pass
 
 # ###################################
 # Define stage cost functions
+beta=0.001 # weight on control input
 
 @jax.jit
 def stage_cost(x,u, beta):
@@ -78,9 +79,7 @@ def stage_cost_cvx(x,u, beta):
 
 # ###################################
 # Define dynamics
-c1=b/(m*L**2)
 c2=g/L
-c3=1/(m*L**2)
 
 @jax.jit
 def control_affine_dynamics(x, model_params):
@@ -90,6 +89,10 @@ def control_affine_dynamics(x, model_params):
     # xdot = jnp.array([x[1], 
     #                   -b/(m*l**2)*x[1]-g/l*jnp.sin(theta)+u/(m*l**2)]) # [rad/s, rad/s^2] 
     # xnext = x + Ts*xdot
+
+    m = model_params # mass of pendulum [kg]
+    c3=1/(m*L**2)
+    c1=b*c3
     
     f = x + Ts*jnp.array([x[1],
                           -c1*x[1]-c2*jnp.sin(x[0])]) 
@@ -160,9 +163,8 @@ if GenerateData:
             # around the reference with small velocity
             x0 = np.array([theta_ref+np.random.randn()*np.pi/20., np.random.randn()*.01])
             
-        log10_beta = log10_beta_min + np.random.rand()*(log10_beta_max-log10_beta_min) 
-        beta = 10.**log10_beta.item() # random beta
-        
+        mass = mass_min + np.random.rand()*(mass_max-mass_min) # random mass
+        model_params = jnp.array(mass) # pass mass as model parameter
         theoptions=options.copy()
         solver=jaxopt.ScipyBoundedMinimize(fun=opt_control_loss, method="L-BFGS-B", options=theoptions, maxiter=5000)
         
@@ -183,7 +185,7 @@ if GenerateData:
         #print(np.hstack(((K_lqr@Xopt[:-1,:].T).T,Uopt[1:].reshape(-1,1))))
         failed = np.isnan(loss) or not status.success # or loss>2000. # discard NaNs and outliers
         print(f"seed = {seed: 5d}, cost = {loss: 8.4f} " + ("(FAILED!)" if failed else "(OK)"))        
-        return {"x0": x0, "loss": loss, "failed": failed, "Uopt": Uopt, "log10_beta": log10_beta}
+        return {"x0": x0, "loss": loss, "failed": failed, "Uopt": Uopt, "mass": mass}
                 
     data = Parallel(n_jobs=cpu_count())(delayed(solve_optimal_control_problem)(seed) for seed in range(M))
     
@@ -196,22 +198,22 @@ X0 = [data[i]["x0"] for i in range(M)]
 FOPT = [data[i]["loss"] for i in range(M)]
 FAILED = [data[i]["failed"] for i in range(M)]
 UOPT = [data[i]["Uopt"] for i in range(M)]
-LOG10_BETA = [data[i]["log10_beta"] for i in range(M)]
+MASS = [data[i]["mass"] for i in range(M)]
 
 # Clean up data by removing possible NaNs
 ii=np.where(np.array(FAILED))[0]
 X0 = np.delete(X0,ii,axis=0)
 UOPT = [Uopt for i, Uopt in enumerate (UOPT) if i not in ii]
 FOPT = np.delete(FOPT,ii,axis=0)
-LOG10_BETA = np.delete(LOG10_BETA,ii,axis=0)
+MASS = np.delete(MASS,ii,axis=0)
 
 X0 = np.array(X0)
 UOPT = np.array(UOPT)
 FOPT = np.array(FOPT)
-LOG10_BETA = np.array(LOG10_BETA)
+MASS = np.array(MASS)
 
 X = X0
-Theta = LOG10_BETA.reshape(-1,1) # parameters
+Theta = MASS.reshape(-1,1) # parameters
 F = FOPT # function values
 U = np.hstack([UOPT[:,0]]).reshape(-1,nu) # control inputs
 
@@ -219,8 +221,8 @@ U = np.hstack([UOPT[:,0]]).reshape(-1,nu) # control inputs
 def check_solution(i):
     x0=X0[i]
     Uopt = UOPT[i]
+    model_params=np.array(MASS[i])
     Xopt = simulation(x0,Uopt,model_params=model_params)
-    beta=10.**LOG10_BETA[i]
 
     fig, ax = plt.subplots(2,1)
     ax[0].plot(np.arange(Xopt.shape[0])*Ts, Xopt[:,0], label='$\\theta$')
@@ -228,7 +230,7 @@ def check_solution(i):
     ax[0].plot(0.,x0[0], 'o')
     ax[0].legend()
     ax[0].grid()
-    ax[1].plot(np.arange(Xopt.shape[0]-1)*Ts, Uopt[:-1], label=f'$u$ ($\\beta$={beta:.5f})')
+    ax[1].plot(np.arange(Xopt.shape[0]-1)*Ts, Uopt[:-1], label=f'$u$ ($m$={MASS[i]:.5f})')
     ax[1].legend()
     ax[1].grid()
     plt.show()
@@ -256,13 +258,13 @@ X_train = X[ii[0:N_train],:]
 Theta_train = Theta[ii[0:N_train],:]
 F_train = F[ii[0:N_train]]
 U_train = U[ii[0:N_train],:]
-LOG10_BETA_train = LOG10_BETA[ii[0:N_train]]
+MASS_train = MASS[ii[0:N_train]]
 
 X_test = X[ii[-N_test:],:]
 Theta_test = Theta[ii[-N_test:],:]
 F_test = F[ii[-N_test:]]
 U_test = U[ii[-N_test:],:]
-LOG10_BETA_test = LOG10_BETA[ii[-N_test:]]
+MASS_test = MASS[ii[-N_test:]]
 
 print(f"Set size: {X_train.shape[0]} training samples, {X_test.shape[0]} test samples")
 
@@ -293,13 +295,19 @@ else:
 R2_train = stats['R2']
 R2_test= pcf._compute_r2(F_test, pcf.model.predict(np.hstack((X_test, Theta_test)).reshape(-1, pcf.n + pcf.p)))
 
-print(f"R2 score on (u,p) -> y mapping: {R2_train:.2f} (training data), {R2_test:.2f} (test data)")
+print(f"\U0001F7E5"*30)
+print(f"R2 score on (x,th) -> y mapping: {R2_train:.6f} (training data), {R2_test:.6f} (test data)")
 
 # sparsity analysis
 w=np.block([pcf.model.params[i].ravel() for i in range(len(pcf.model.params))])
 nonzeros = np.sum(np.abs(w)>pcf.model.zero_coeff)
 nz_perc = 100-100*nonzeros/len(w)
-print(f"Number of non-zero parameters: {nonzeros} out of {len(w)} (zeros = {nz_perc:.2f}%)")
+print(f"Number of non-zero parameters:   {nonzeros} out of {len(w)} (zeros = {nz_perc:.2f}%)")
+
+n_out_psi=pcf.w_psi[-1]
+print(f"Number of outputs of the psi-network: {n_out_psi}")
+print(f"Training time: {stats['time']:.2f} s")
+print(f"\U0001F7E5"*30)
 
 # if Theta.ndim == 1:
 #     Theta = Theta.reshape(-1,1)
@@ -312,11 +320,10 @@ u_cvx = cp.Variable((nu,1))
 f0_cvx = cp.Parameter((nx,1)) # x1 = f(x0) + g(x0)*u
 g0_cvx = cp.Parameter((nx,1)) 
 x0_cvx = cp.Parameter((nx,1))
-log10_beta_cvx = cp.Parameter((1,1))
+mass_cvx = cp.Parameter((1,1), nonneg=True)
 x1_cvx =  f0_cvx + g0_cvx@u_cvx
 
-beta = cp.exp(cp.multiply(np.log(10.), log10_beta_cvx))
-cvx_loss = Foff+Fmax*pcf.tocvxpy(x1_cvx, log10_beta_cvx)+stage_cost_cvx(x0_cvx, u_cvx, beta) # stage cost
+cvx_loss = Foff+Fmax*pcf.tocvxpy(x1_cvx, mass_cvx)+stage_cost_cvx(x0_cvx, u_cvx, beta) # stage cost
 
 constr = [umin <= u_cvx, u_cvx <= umax]
 cvx_prob = cp.Problem(cp.Minimize(cvx_loss), constr) 
@@ -328,9 +335,9 @@ if CompareInputs:
     Uhat_test = np.empty((N_test,nu))
     for i in range(N_test):
         x0 = X_test[i]
-        log10_beta_cvx.value = LOG10_BETA_test[i].reshape(1,1)
+        mass_cvx.value = MASS_test[i].reshape(1,1)
         x0_cvx.value = x0.reshape(nx,1)
-        fx,gx = control_affine_dynamics(x0.reshape(nx), model_params=model_params)
+        fx,gx = control_affine_dynamics(x0.reshape(nx), model_params=np.array(MASS_test[i]))
         f0_cvx.value = np.array(fx).reshape(nx,1)
         g0_cvx.value = np.array(gx).reshape(nx,1)
         #cvx_prob.solve(solver=cp.CLARABEL, tol_gap_abs=1.e-12)
@@ -341,9 +348,9 @@ if CompareInputs:
     Uhat_train = np.empty((N_train,nu))
     for i in range(N_train):
         x0 = X_train[i]
-        log10_beta_cvx.value = LOG10_BETA_train[i].reshape(1,1)
+        mass_cvx.value = MASS_train[i].reshape(1,1)
         x0_cvx.value = x0.reshape(nx,1)
-        fx,gx = control_affine_dynamics(x0.reshape(nx), model_params=model_params)
+        fx,gx = control_affine_dynamics(x0.reshape(nx), model_params=np.array(MASS_train[i]))
         f0_cvx.value = np.array(fx).reshape(nx,1)
         g0_cvx.value = np.array(gx).reshape(nx,1)
         #cvx_prob.solve(solver=cp.CLARABEL, tol_gap_abs=1.e-12)
@@ -354,36 +361,38 @@ if CompareInputs:
     plt.scatter(U_train,Uhat_train, label='training data')
     plt.scatter(U_test,Uhat_test, label='test data')
     plt.plot([umin,umax], [umin,umax], 'r--')
-    xumin = np.minimum(np.min(U_train),np.min(U_test))
-    xumax = np.maximum(np.max(U_train),np.max(U_test))
+    xumin = np.minimum(np.min(U_train),np.min(U_test))-10.
+    xumax = np.maximum(np.max(U_train),np.max(U_test))+10.
     plt.xlim(xumin,xumax)
     plt.ylim(xumin,xumax)
-    plt.xlabel('true value')
-    plt.ylabel('predicted value')
+    plt.xlabel('$u^*_0$ (nonlinear)')
+    plt.ylabel('$\hat u_0$ (convex)')
     plt.grid()
     plt.legend()
     plt.show()
-    plt.title('ADP')
+    plt.title('Convex ADP vs nonlinear optimal control', fontsize=20)
+    plt.savefig('adp_inputs.pdf', bbox_inches='tight')
 
 if CompareClosedLoop:
     # Generate closed-loop test data using the optimal control policy (receding horizon)
-    def closed_loop_optimal(x0, method, N_sim, beta, model_params):        
+    def closed_loop_optimal(x0, method, N_sim, mass, model_params):        
         xk = x0.copy()
         X= [x0.reshape(nx)]
         U= list()
-
+        model_params = np.array(mass)
+        
         Uopt=np.zeros((H,1))
-        for k in range(N_sim):
+        for k in range(N_sim):            
             if method=='nonlinear':
                 theoptions=options.copy()
                 solver=jaxopt.ScipyBoundedMinimize(fun=opt_control_loss, method="L-BFGS-B", options=theoptions, maxiter=options['maxfun'])
                 U_guess=np.vstack((Uopt[1:,:],Uopt[-1,:])) # shifted previous optimal sequence
                 Uopt, status = solver.run(U_guess, bounds = (Umin,Umax), x0=xk.reshape(nx), beta=beta, model_params=model_params)
                 uk = Uopt[0,:]
-                fx,gx = control_affine_dynamics(xk.reshape(nx),model_params=model_params)
+                fx,gx = control_affine_dynamics(xk.reshape(nx), model_params=model_params)
             elif method=='adp':
                 # use the surrogate model to compute the optimal control input
-                log10_beta_cvx.value = np.array(np.log10(beta)).reshape(1,1)
+                mass_cvx.value = np.array(mass).reshape(1,1)
                 x0_cvx.value = xk.reshape(nx,1)
                 fx,gx = control_affine_dynamics(xk.reshape(nx), model_params=model_params)
                 f0_cvx.value = np.array(fx).reshape(nx,1)
@@ -401,21 +410,91 @@ if CompareClosedLoop:
                   f", x = [{xk[0].item(): 5.4f}, {xk[1].item(): 5.4f}], u = {uk[0].item(): 5.4f}")
         return np.vstack(X), np.vstack(U)
     
+    # Swing up the pendulum from the down position
+    mass=1.
     x0 = np.array([0.,0.])
-    Xn,Un = closed_loop_optimal(x0, 'nonlinear', H, 10**LOG10_BETA_test[i], model_params)
-    Xa,Ua = closed_loop_optimal(x0, 'adp', H, 10**LOG10_BETA_test[i], model_params)
+    Xn,Un = closed_loop_optimal(x0, 'nonlinear', H, mass, model_params)
+    Xa,Ua = closed_loop_optimal(x0, 'adp', H, mass, model_params)
     
     fig,ax = plt.subplots(2,1)
     ax[0].plot(np.arange(Xn.shape[0])*Ts, Xn[:,0], label='nonlinear')
     ax[0].plot(np.arange(Xn.shape[0])*Ts, Xa[:,0], label='ADP')
     ax[0].grid()
     ax[0].legend()
-    ax[0].set_ylabel('$\\theta$ [rad]')
+    ax[0].set_ylabel('$\\delta$ [rad]')
     ax[1].set_xlabel('time [s]')
-    ax[1].set_ylabel('control input [N*m]')    
+    ax[1].set_ylabel('$u$ [Nm]')    
     ax[1].plot(np.arange(Xn.shape[0]-1)*Ts, Un, label='nonlinear')
     ax[1].plot(np.arange(Xn.shape[0]-1)*Ts, Ua, label='ADP')
     ax[1].grid()
     ax[1].legend()
     plt.show()
+    ax[0].set_title('Closed-loop control', fontsize=20)
+    plt.savefig('adp_closed_loop.pdf', bbox_inches='tight')
     
+    
+if PlotValueFunction:
+    # Plot value function
+    nth=100
+    nthdot = 10
+    x1 = np.linspace(xmin[0],xmax[0],nth)
+    x2 = np.linspace(xmin[1],xmax[1],nthdot)
+    X1, X2 = np.meshgrid(x1,x2)
+    mass = 1.
+    Z = np.empty(X1.shape)
+    for i in range(X1.shape[0]):
+        for j in range(X1.shape[1]):
+            x0 = np.array([X1[i,j],X2[i,j]])
+            theoptions=options.copy()
+            solver=jaxopt.ScipyBoundedMinimize(fun=opt_control_loss, method="L-BFGS-B", options=theoptions, maxiter=5000)
+            U_guess = np.zeros((H,nu)) 
+            Uopt, status = solver.run(U_guess, bounds = (Umin,Umax), x0=x0, beta=beta, model_params=jnp.array(mass))
+            Z[i,j] = status.fun_val
+            print(f"i={i: 2d}, j={j: 2d}, cost = {status.fun_val: 8.4f} " + ("(FAILED!)" if status.status != 0 else "(OK)"))
+    
+    # Plot the level sets of the optimal value function
+    plt.figure(figsize=(8, 6))
+    contour = plt.contour(X1, X2, Z, levels=10, cmap='viridis')
+    #plt.colorbar(contour)
+    plt.title("Optimal value function")
+    plt.xlabel('$\\theta$ [rad]')
+    plt.ylabel('$\\dot{\\theta}$ [rad/s]')
+    plt.legend()
+    plt.show()
+    
+    plt.figure(figsize=(8, 6))
+    for i in range(nthdot):
+        plt.plot(X1[i,:], Z[i,:], label=f'$\\dot{{\\theta}}$={X2[i,0]:.2f}')
+    plt.grid()
+    plt.title("Optimal value function")
+    plt.xlabel('$\\theta$ [rad]')
+    plt.ylabel('cost')
+    plt.legend()
+    plt.show()
+            
+    plt.figure(figsize=(8, 6))
+    for i in range(nth):
+        plt.plot(X2[:,i], Z[:,i])
+    plt.grid()
+    plt.title("Optimal value function")
+    plt.xlabel('$\\dot\\theta$ [rad/s]')
+    plt.ylabel('cost')
+    plt.legend()
+    plt.show()
+
+    # Compute PCF
+    Zhat = np.empty(X1.shape)
+    for i in range(X1.shape[1]):
+        Zhat[:,i] = pcf.model.predict(np.hstack((X1[:,i], X2[:,i],np.tile(mass,X1.shape[0]))).reshape(-1, pcf.n + pcf.p)).reshape(-1)
+    Zhat = Foff + Fmax*Zhat
+
+    # Approximate value function
+    plt.figure(figsize=(8, 6))
+    contour = plt.contour(X1, X2, Zhat, levels=10, cmap='viridis')
+    #plt.colorbar(contour)
+    plt.title("Parametric Convex Function")
+    plt.xlabel('$\\theta$ [rad]')
+    plt.ylabel('$\\dot{\\theta}$ [rad/s]')
+    plt.legend()
+    plt.grid()
+    plt.show()
