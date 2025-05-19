@@ -8,6 +8,7 @@ import pickle
 import numpy as np
 import cvxpy as cp
 from pcf import PCF
+from utils import _compute_r2
 import jax
 import jax.numpy as jnp
 import jaxopt
@@ -291,9 +292,9 @@ else:
     pcf.model.params = data["params"]
     stats = data["stats"]
     
-#R2_train = pcf._compute_r2(F_train, pcf.model.predict(np.hstack((X_train, Theta_train)).reshape(-1, pcf.n + pcf.p)))
+#R2_train = _compute_r2(F_train, pcf.model.predict(np.hstack((X_train, Theta_train)).reshape(-1, pcf.n + pcf.p)))
 R2_train = stats['R2']
-R2_test= pcf._compute_r2(F_test, pcf.model.predict(np.hstack((X_test, Theta_test)).reshape(-1, pcf.n + pcf.p)))
+R2_test= _compute_r2(F_test, pcf.model.predict(np.hstack((X_test, Theta_test)).reshape(-1, pcf.n + pcf.p)))
 
 print(f"\U0001F7E5"*30)
 print(f"R2 score on (x,th) -> y mapping: {R2_train:.6f} (training data), {R2_test:.6f} (test data)")
