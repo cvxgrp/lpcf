@@ -254,7 +254,7 @@ class PCF:
         tau_th : float
             Regularization parameter in r(w) = rho_th ||w||_2^2 + tau_th ||w||_1.
         zero_coeff : float
-            Zero coefficient.
+            Entries smaller than zero_coeff in absolute value are set to zero after training. Useful when tau_th>0
         seeds : array-like
             Random seeds for training from multiple initial guesses.
         cores : int
