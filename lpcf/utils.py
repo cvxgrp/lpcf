@@ -78,6 +78,7 @@ def _append_section(section, offset, shape, size=None):
 def _compute_r2(Y, Yhat, return_msg=False):
     """Compute R2 score for true outputs Y and predicted outputs Yhat"""
     r2, _, msg = compute_scores(Y, Yhat, None, None, fit='R2')
+    r2 = np.mean(r2)
     if return_msg:
         return r2, msg
     else:
@@ -87,6 +88,7 @@ def _compute_r2(Y, Yhat, return_msg=False):
 def _compute_acc(Y, Yhat, return_msg=False):
     """Compute accuracy for true labls Y and predicted labels Yhat"""
     acc, _, msg = compute_scores(Y==-1, Yhat<=0, None, None, fit='Accuracy')
+    acc = np.mean(acc)
     if return_msg:
         return acc, msg
     else:

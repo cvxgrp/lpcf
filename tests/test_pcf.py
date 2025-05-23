@@ -44,7 +44,7 @@ def test_pcf_fit():
     pcf = PCF()
     
     N = 100
-    d, n, p = 1, 3, 2
+    d, n, p = 2, 3, 2
     np.random.seed(0)
     Y = np.random.randn(N, d)
     X = np.random.randn(N, n)
