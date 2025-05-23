@@ -13,7 +13,7 @@ authors = [
 ]
 license = {text = "Apache 2.0"}
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "jax-sysid>=1.0.6",
     "cvxpy>= 1.6.0",
