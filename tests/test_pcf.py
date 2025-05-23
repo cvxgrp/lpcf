@@ -62,6 +62,20 @@ def test_pcf_predict():
     pcf = PCF()
     
     N = 100
+    d, n, p = 2, 2, 2
+    np.random.seed(0)
+    Y = np.random.randn(N, d)
+    X = np.random.randn(N, n)
+    Theta = np.random.randn(N, p)
+    
+    pcf.fit(Y, X, Theta, adam_epochs=20, lbfgs_epochs=200)
+    
+    Yhat = pcf.predict(X, Theta)
+    assert Yhat.shape == (N, d)
+    
+    pcf = PCF()
+    
+    N = 100
     d, n, p = 1, 3, 2
     np.random.seed(0)
     Y = np.random.randn(N, d)
@@ -71,7 +85,21 @@ def test_pcf_predict():
     pcf.fit(Y, X, Theta, adam_epochs=20, lbfgs_epochs=200)
     
     Yhat = pcf.predict(X, Theta)
-    assert Yhat.shape == (N,)  # TODO: check if should be consistent with tojax(), where shape is (N, d) = (N, 1)
+    assert Yhat.shape == (N, d)
+    
+    pcf = PCF()
+    
+    N = 100
+    d, n, p = 2, 1, 1
+    np.random.seed(0)
+    Y = np.random.randn(N, d)
+    X = np.random.randn(N, n)
+    Theta = np.random.randn(N, p)
+    
+    pcf.fit(Y, X, Theta, adam_epochs=20, lbfgs_epochs=200)
+    
+    Yhat = pcf.predict(X, Theta)
+    assert Yhat.shape == (N, d)
     
 def test_pcf_tocvxpy():
     """Test tocvxpy method of PCF class"""

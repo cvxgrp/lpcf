@@ -469,7 +469,8 @@ class PCF:
             PCF outputs of shape (N, d).
         """
         
-        return self.model.predict(jnp.hstack((X.reshape(-1,self.n),Theta.reshape(-1,self.p)))).reshape(-1)
+        XTheta = jnp.hstack((X.reshape(-1, self.n), Theta.reshape(-1, self.p)))
+        return self.model.predict(XTheta).reshape(-1, self.d)
 
 
     def argmin(self, fun=None, penalty=1.e4) -> None:
