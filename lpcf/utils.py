@@ -46,16 +46,6 @@ class Section:
     end: int = 0
     shape: tuple = (0, 0)
     
-    
-def _append_section(section, offset, shape, size=None):
-    """Add section in psi output p, such that p[start:end].reshape(shape)
-    is a matrix or vector in main network; returns offset for next section"""
-    
-    if size is None:
-        size = np.prod(shape)
-    section.append(Section(start=offset, end=offset+size, shape=shape))
-    return offset+size
-    
 
 def _rand(m, n):
     """Compute a ramdom array of shape (m, n) and entries in [-0.5, 0.5]"""
@@ -67,6 +57,22 @@ def _unsqueeze(x):
     if x.ndim == 1:
         return x.reshape(-1, 1)
     return x
+
+
+def _map_matmul(A, b):
+    """Map matrix multiplication with JAX"""
+    
+    return jax.vmap(jnp.matmul)(A, b)
+
+
+def _append_section(section, offset, shape, size=None):
+    """Add section in psi output p, such that p[start:end].reshape(shape)
+    is a matrix or vector in main network; returns offset for next section"""
+    
+    if size is None:
+        size = np.prod(shape)
+    section.append(Section(start=offset, end=offset+size, shape=shape))
+    return offset+size
 
 
 def _compute_r2(Y, Yhat, return_msg=False):
@@ -85,12 +91,6 @@ def _compute_acc(Y, Yhat, return_msg=False):
         return acc, msg
     else:
         return acc
-
-
-def _map_matmul(A, b):
-    """Map matrix multiplication with JAX"""
-    
-    return jax.vmap(jnp.matmul)(A, b)
 
 
 def _extract_activations(activation_registry, activation, activation_psi):

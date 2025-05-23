@@ -8,7 +8,7 @@ M. Schaller, A. Bemporad, March 19, 2025
 import jax
 import jax.numpy as jnp
 import cvxpy as cp
-from utils import Activation, MakePositive
+from lpcf.utils import Activation, MakePositive
 
 
 # registry of activation functions, with their jax and cvxpy implementations

@@ -12,8 +12,8 @@ from typing import Callable, Dict, List
 from jax_sysid.models import StaticModel
 import jax
 import jax.numpy as jnp
-from config import ACTIVATIONS, MAKE_POSITIVE
-from utils import Ind, WeightInd, _extract_activations, _extract_monotonicity, _append_section, \
+from lpcf.config import ACTIVATIONS, MAKE_POSITIVE
+from lpcf.utils import Ind, WeightInd, _extract_activations, _extract_monotonicity, _append_section, \
     _rand, _unsqueeze, _map_matmul, _compute_r2, _compute_acc
 
 jax.config.update('jax_platform_name', 'cpu')
@@ -412,7 +412,7 @@ class PCF:
             Vl = WVomega_flat[s.start:s.end].reshape(s.shape, order='C')
             V.append(Vl if self.monotonicity is None else self.monotonicity*MAKE_POSITIVE.cvxpy(Vl))
         for s in self.section_omega:
-            omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1)))
+            omega.append(WVomega_flat[s.start:s.end].reshape((-1, 1), order='C'))
 
         # expression for main network, using expression for psi network
         y = V[0] @ x + omega[0]
@@ -428,7 +428,7 @@ class PCF:
             else:  # low-rank plus diagonal, Q = F^T F + D, F wide and D diagonal
                 F = WVomega_flat[s.start:s.end].reshape(s.shape, order='C')
                 s = self.section_quadratic[1]
-                diag_sqrt = WVomega_flat[s.start:s.end].reshape((-1, 1))
+                diag_sqrt = WVomega_flat[s.start:s.end].reshape((-1, 1), order='C')
                 y += cp.sum_squares(F @ x) + cp.sum_squares(cp.multiply(diag_sqrt, x))
         if self.nonneg:
             y = MAKE_POSITIVE.cvxpy(y)
