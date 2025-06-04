@@ -7,8 +7,8 @@ A. Bemporad, May 7, 2025
 import pickle
 import numpy as np
 import cvxpy as cp
-from pcf import PCF
-from utils import _compute_r2
+from lpcf.pcf import PCF
+from lpcf.utils import _compute_r2
 import jax
 import jax.numpy as jnp
 import jaxopt

@@ -1,11 +1,10 @@
 
 import pickle
 import numpy as np
-import matplotlib.pyplot as plt
 from lpcf.pcf import PCF
+import matplotlib.pyplot as plt
 
-seed = 3
-np.random.seed(seed)
+np.random.seed(3)
 
 # data generating (true) function
 # x = (E, I)
@@ -56,15 +55,14 @@ Theta = np.array(theta_)
 pcf = PCF(widths=[5, 5], widths_psi=[10], activation='logistic')
 stats = pcf.fit(Y, X, Theta, rho_th=0., cores=10, adam_epochs=1000, lbfgs_epochs=4000)
 
-print(f"Elapsed time: {stats['time']} s")
-print(f"R2 score on (u,p) -> y mapping:         {stats['R2']}")
-print(f"lambda value: {stats['lambda']}")
+print(f'Elapsed time: {stats['time']} s')
+print(f'R2 score: {stats['R2']}')
 
 # export to jax
 
 f = pcf.tojax()
 
-# evaluate f_true and f for 6 random points in Theta, over a grid of 100 points in X
+# evaluate
 
 np.random.seed(0)
 
@@ -87,7 +85,6 @@ for _ in range(10):
     y_.append(y)
     theta_.append(th)
     
-# pickle X1_grid, X2_grid, y_true_, y_, a_
 with open('example_battery.pkl', 'wb') as f:
     pickle.dump([X1_grid, X2_grid, X1_test, X2_test, y_true_, y_, theta_], f)
 
@@ -97,27 +94,18 @@ fig, axes = plt.subplots(3, 3, subplot_kw={'projection': '3d'}, figsize=(15, 8))
 
 for i, ax in enumerate(axes.flat):
     
-    # Plot the true surface
     ax.plot_surface(X1_grid, X2_grid, y_true_[i], color='blue', alpha=0.6, label='y_true')
-    
-    # Plot the predicted surface
     ax.plot_surface(X1_grid, X2_grid, y_[i], color='orange', alpha=0.4, label='y')
     
     mse = np.mean((y_true_[i] - y_[i])**2)
     ax.set_title(r'$\theta^' + str(i + 1) + r'$')
-    
-    #ax.set_zlim(0, 40)
-    
+        
     if i == 0:
         ax.legend()
 
-# Adjust layout to prevent overlap
 plt.tight_layout()
 plt.show()
 
-print('done')
-
-# load [X1_grid, X2_grid, y_true_, y_, a_] that was saved to example_quadratic.pkl
 with open('example_battery.pkl', 'rb') as f:
     X1_grid, X2_grid, X1_test, X2_test, y_true_, y_, theta_ = pickle.load(f)
 
@@ -130,7 +118,6 @@ def f_short(x, theta, scale=scale):
     nu = alpha / beta
     return scale * mu * (1 + nu / 2) * b
     
-
 y_short_ = []
 for k in range(10):
     y_short = np.zeros((len(X2_test), len(X1_test)))
@@ -139,7 +126,6 @@ for k in range(10):
             x = np.array([x1, x2])
             y_short[j, i] = f_short(x, theta_[k])
     y_short_.append(y_short)
-    
     
 sum_squares = 0
 sum_squares_short = 0
@@ -163,22 +149,19 @@ for i in range(len(y_true_)):
     sum_squares_short += np.sum((y_true_[i] - y_short_[i])**2)
     
 
-print(f"Ranging from {mi} to {ma}")
-print(f"Number of samples = {num}")
-    
 RMS = np.sqrt(sum_squares / num)
-print(f"RMS = {RMS}")
-
 RMS_short = np.sqrt(sum_squares_short / num)
+
+print(f'Ranging from {mi} to {ma}')
+print(f'Number of samples = {num}')
+print(f"RMS = {RMS}")
 print(f"RMS short = {RMS_short}")
 
-# use latex for text rendering
 plt.rcParams['text.usetex'] = True
 plt.rcParams['font.family'] = 'serif'
 plt.rcParams['font.size'] = 20
 
 indices = [6, 1, 3]
-
 
 fig, axes = plt.subplots(1, 3, subplot_kw={'projection': '3d'}, figsize=(14, 8))
 
@@ -186,20 +169,14 @@ for idx, ax in enumerate(axes.flat):
     
     i = indices[idx]
     
-    # Plot the true surface
     ax.plot_surface(X1_grid, X2_grid, y_true_[i], color='blue', alpha=0.6, label=r'$f^{\mathrm{true}}$')
-    
-    # set rotation of plot around vertical axis
-    ax.view_init(elev=20, azim=220)
-    
-    # Plot the predicted surface
     ax.plot_surface(X1_grid, X2_grid, y_[i], color='red', alpha=0.4, label='$f$')
     
+    ax.view_init(elev=20, azim=220)
     ax.set_title(r'$\theta^' + str(idx + 1) + r'$')
     
     ax.set_xlabel('$q$')
     ax.set_ylabel('$b$')
-    
     
     ax.set_zlim(0, 0.02)
     ax.set_zticks([0, 0.01, 0.02])
@@ -209,9 +186,6 @@ for idx, ax in enumerate(axes.flat):
         ax.set_zlabel('$y$')
         ax.legend()
 
-# Adjust layout to prevent overlap
 plt.tight_layout()
 plt.subplots_adjust(left=0.05, right=1.0, top=1.0, bottom=0.)
-
-#plt.savefig('example_battery.pdf')
 plt.show()
