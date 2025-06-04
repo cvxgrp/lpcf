@@ -17,7 +17,7 @@ and the parameter, the learned PCF can be exported for use in optimization
 frameworks like [CVXPY](https://www.cvxpy.org) or [JAX](https://docs.jax.dev/en/latest/index.html).
 
 LPCF supports learning vector functions that depend on multiple variables and parameters.
-An overview of LPCF can be found in our [manuscript](XXX).
+An overview of LPCF can be found in our [manuscript](https://stanford.edu/~boyd/papers/lpcf.html).
 
 ## Installation
 LPCF is available on PyPI, and can be installed with
