@@ -111,7 +111,7 @@ Please cite the following paper if you use this software:
 @article{SBB25,
     author={Maximilian Schaller and Alberto Bemporad and Stephen Boyd},
     title={Learning Parametric Convex Functions},
-    note = {available on arXiv at \url{http://arxiv.org/abs/XXXX.XXXXX}},
+    note = {available on arXiv at \url{https://arxiv.org/pdf/2506.04183}},
     year=2025
 }
 ```
