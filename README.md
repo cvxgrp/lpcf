@@ -27,7 +27,7 @@ pip install lpcf
 
 LPCF has the following dependencies:
 
-- Python >= 3.9
+- Python >= 3.10, <3.13
 - jax-sysid >= 1.0.6
 - CVXPY >= 1.6.0
 - NumPy >= 1.21.6
