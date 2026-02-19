@@ -40,7 +40,7 @@ exports the result to CVXPY.
 ```python3
 from lpcf.pcf import PCF
 
-# observed data
+# data
 Y = ...      # shape (N, d)
 X = ...      # shape (N, n)
 Theta = ...  # shape (N, p)
