@@ -20,7 +20,7 @@ plt.rcParams['text.usetex'] = True
 plt.rcParams['font.family'] = 'serif'
 #plt.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}'
 plt.rcParams['font.size'] = 20
-np.random.seed(1)
+np.random.seed(0)
 
 GenerateData=0
 TrainModel=0
@@ -359,9 +359,9 @@ if CompareInputs:
         Uhat_train[i,:] = u_cvx.value.reshape(nu)
 
     plt.figure()
-    plt.scatter(U_train,Uhat_train, label='training data')
-    plt.scatter(U_test,Uhat_test, label='test data')
-    plt.plot([umin,umax], [umin,umax], 'r--')
+    plt.scatter(U_train,Uhat_train, facecolor='b', label='training data')
+    plt.scatter(U_test,Uhat_test, facecolor='r', label='test data')
+    plt.plot([umin,umax], [umin,umax], 'k--')
     xumin = np.minimum(np.min(U_train),np.min(U_test))-10.
     xumax = np.maximum(np.max(U_train),np.max(U_test))+10.
     plt.xlim(xumin,xumax)
@@ -370,9 +370,9 @@ if CompareInputs:
     plt.ylabel('$\hat u_0$ (convex)')
     plt.grid()
     plt.legend()
-    plt.show()
     plt.title('Convex ADP vs nonlinear optimal control', fontsize=20)
     plt.savefig('adp_inputs.pdf', bbox_inches='tight')
+    plt.show()
 
 if CompareClosedLoop:
     # Generate closed-loop test data using the optimal control policy (receding horizon)
@@ -418,20 +418,20 @@ if CompareClosedLoop:
     Xa,Ua = closed_loop_optimal(x0, 'adp', H, mass, model_params)
     
     fig,ax = plt.subplots(2,1)
-    ax[0].plot(np.arange(Xn.shape[0])*Ts, Xn[:,0], label='nonlinear')
-    ax[0].plot(np.arange(Xn.shape[0])*Ts, Xa[:,0], label='ADP')
+    ax[0].plot(np.arange(Xn.shape[0])*Ts, Xn[:,0], 'r', label='nonlinear')
+    ax[0].plot(np.arange(Xn.shape[0])*Ts, Xa[:,0], 'b', label='ADP')
     ax[0].grid()
     ax[0].legend()
     ax[0].set_ylabel('$\\delta$ [rad]')
     ax[1].set_xlabel('time [s]')
     ax[1].set_ylabel('$u$ [Nm]')    
-    ax[1].plot(np.arange(Xn.shape[0]-1)*Ts, Un, label='nonlinear')
-    ax[1].plot(np.arange(Xn.shape[0]-1)*Ts, Ua, label='ADP')
+    ax[1].plot(np.arange(Xn.shape[0]-1)*Ts, Un, 'r', label='nonlinear')
+    ax[1].plot(np.arange(Xn.shape[0]-1)*Ts, Ua, 'b', label='ADP')
     ax[1].grid()
-    ax[1].legend()
-    plt.show()
+    # ax[1].legend()
     ax[0].set_title('Closed-loop control', fontsize=20)
     plt.savefig('adp_closed_loop.pdf', bbox_inches='tight')
+    plt.show()
     
     
 if PlotValueFunction:
